@@ -40,6 +40,7 @@ function createEmptyState() {
     latestSnapshot: null,
     history: [],
     players: {},
+    uuidDirectory: {},
     leaderboards: {
       kills: { items: [], updatedAt: 0 },
       balance: { items: [], updatedAt: 0 },
@@ -61,6 +62,7 @@ function parseState(value) {
     ...base,
     ...value,
     players: value.players && typeof value.players === 'object' ? value.players : {},
+    uuidDirectory: value.uuidDirectory && typeof value.uuidDirectory === 'object' ? value.uuidDirectory : {},
     history: Array.isArray(value.history) ? value.history : [],
     leaderboards: {
       ...base.leaderboards,

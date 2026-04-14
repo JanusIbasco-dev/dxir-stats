@@ -11,9 +11,8 @@ const {
   withState,
 } = require('./_state');
 
-const UUID_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const MOJANG_PROFILE_URL = 'https://api.mojang.com/users/profiles/minecraft/';
-const uuidCache = new Map();
+const mojangRequestCache = new Map();
 
 const defaultSnapshot = {
   cpu: 0,
@@ -62,13 +61,11 @@ async function resolveUuidFromMojang(username) {
     return '';
   }
 
-  const now = Date.now();
-  const cached = uuidCache.get(key);
-  if (cached && cached.expiresAt > now) {
-    return cached.uuid;
+  if (mojangRequestCache.has(key)) {
+    return mojangRequestCache.get(key);
   }
 
-  try {
+  const pending = (async () => {
     const response = await fetch(`${MOJANG_PROFILE_URL}${encodeURIComponent(key)}`, {
       method: 'GET',
       headers: {
@@ -77,32 +74,34 @@ async function resolveUuidFromMojang(username) {
     });
 
     if (!response.ok) {
-      uuidCache.set(key, { uuid: '', expiresAt: now + 60 * 1000 });
       return '';
     }
 
     const payload = await response.json();
-    const uuid = normalizeUuid(payload?.id);
-    uuidCache.set(key, {
-      uuid,
-      expiresAt: now + UUID_CACHE_TTL_MS,
+    return normalizeUuid(payload?.id);
+  })()
+    .catch(() => '')
+    .finally(() => {
+      mojangRequestCache.delete(key);
     });
-    return uuid;
+
+  mojangRequestCache.set(key, pending);
+
+  try {
+    return await pending;
   } catch (error) {
-    uuidCache.set(key, { uuid: '', expiresAt: now + 60 * 1000 });
     return '';
   }
 }
 
-async function normalizePlayerEntry(value) {
+function normalizePlayerEntry(value) {
   if (typeof value === 'string') {
     const name = value.trim();
     if (!name) {
       return null;
     }
 
-    const uuid = await resolveUuidFromMojang(name);
-    return { name, uuid, ping: 0, status: 'online' };
+    return { name, uuid: '', ping: 0, status: 'online' };
   }
 
   if (!value || typeof value !== 'object') {
@@ -116,11 +115,9 @@ async function normalizePlayerEntry(value) {
     return null;
   }
 
-  const resolvedUuid = uuid || await resolveUuidFromMojang(name);
-
   return {
     name,
-    uuid: resolvedUuid,
+    uuid,
     ping: normalizeNumber(value.ping ?? value.latency ?? value.ms, 0),
     status: String(value.status || 'online').trim() || 'online',
     lastActive: normalizeNumber(value.lastActive ?? value.activityAt, 0),
@@ -128,16 +125,15 @@ async function normalizePlayerEntry(value) {
   };
 }
 
-async function normalizePlayerList(value) {
+function normalizePlayerList(value) {
   if (!Array.isArray(value)) {
     return [];
   }
 
-  const normalized = await Promise.all(value.map(normalizePlayerEntry));
-  return normalized.filter(Boolean).slice(0, 32);
+  return value.map(normalizePlayerEntry).filter(Boolean).slice(0, 32);
 }
 
-async function normalizePayload(payload = {}) {
+function normalizePayload(payload = {}) {
   const ramUsed = normalizeNumber(payload.ramUsed, defaultSnapshot.ramUsed);
 
   return {
@@ -146,13 +142,54 @@ async function normalizePayload(payload = {}) {
     ramUsed,
     ramMax: normalizeNumber(payload.ramMax, defaultSnapshot.ramMax),
     players: normalizeNumber(payload.players, defaultSnapshot.players),
-    playerList: await normalizePlayerList(payload.playerList),
+    playerList: normalizePlayerList(payload.playerList),
     uptime: normalizeNumber(payload.uptime, defaultSnapshot.uptime),
     ip: typeof payload.ip === 'string' && payload.ip.trim() ? payload.ip.trim() : defaultSnapshot.ip,
     status: normalizeStatus(payload.status),
     time: typeof payload.time === 'string' && payload.time.trim() ? payload.time.trim() : defaultSnapshot.time,
     ready: true,
   };
+}
+
+async function resolvePlayersWithMojangUuid(players, sharedState) {
+  if (!Array.isArray(players) || !players.length) {
+    return [];
+  }
+
+  if (!sharedState.uuidDirectory || typeof sharedState.uuidDirectory !== 'object') {
+    sharedState.uuidDirectory = {};
+  }
+
+  const resolvedPlayers = await Promise.all(players.map(async (player) => {
+    const name = String(player?.name || '').trim();
+    if (!name) {
+      return player;
+    }
+
+    const key = name.toLowerCase();
+    const cachedUuid = normalizeUuid(sharedState.uuidDirectory[key]);
+
+    let mojangUuid = cachedUuid;
+    if (!mojangUuid) {
+      mojangUuid = await resolveUuidFromMojang(name);
+      if (mojangUuid) {
+        sharedState.uuidDirectory[key] = mojangUuid;
+      }
+    }
+
+    const fallbackUuid = normalizeUuid(player.uuid);
+    const finalUuid = mojangUuid || fallbackUuid;
+
+    // Debug mapping to verify live UUID source.
+    console.log(`[DXIR UUID] ${name} => ${finalUuid || 'missing'}`);
+
+    return {
+      ...player,
+      uuid: finalUuid,
+    };
+  }));
+
+  return resolvedPlayers;
 }
 
 function cloneSnapshot(snapshot) {
@@ -304,9 +341,10 @@ function updatePlayerRecords(playersState, players, timestamp) {
 async function storeSnapshot(snapshot) {
   return withState(async (state) => {
     const timestamp = nowMs();
+    const resolvedPlayerList = await resolvePlayersWithMojangUuid(snapshot.playerList || [], state);
     const stampedSnapshot = {
       ...snapshot,
-      playerList: updatePlayerRecords(state.players, snapshot.playerList || [], timestamp),
+      playerList: updatePlayerRecords(state.players, resolvedPlayerList, timestamp),
       lastUpdate: timestamp,
     };
 
@@ -359,7 +397,7 @@ module.exports = async (req, res) => {
   if (req.method === 'POST') {
     try {
       const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
-      const normalizedPayload = await normalizePayload(body);
+      const normalizedPayload = normalizePayload(body);
       await storeSnapshot(normalizedPayload);
       const data = await currentData();
 
