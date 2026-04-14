@@ -3,6 +3,8 @@ const HISTORY_LIMIT = 50;
 const defaultSnapshot = {
   cpu: 0,
   ram: 0,
+  ramUsed: 0,
+  ramMax: 0,
   players: 0,
   playerList: [],
   uptime: 0,
@@ -44,9 +46,13 @@ function normalizePlayerList(value) {
 }
 
 function normalizePayload(payload = {}) {
+  const ramUsed = normalizeNumber(payload.ramUsed, defaultSnapshot.ramUsed);
+
   return {
     cpu: normalizeNumber(payload.cpu, defaultSnapshot.cpu),
-    ram: normalizeNumber(payload.ram, defaultSnapshot.ram),
+    ram: normalizeNumber(payload.ram, Math.round(ramUsed * 1024)),
+    ramUsed,
+    ramMax: normalizeNumber(payload.ramMax, defaultSnapshot.ramMax),
     players: normalizeNumber(payload.players, defaultSnapshot.players),
     playerList: normalizePlayerList(payload.playerList),
     uptime: normalizeNumber(payload.uptime, defaultSnapshot.uptime),

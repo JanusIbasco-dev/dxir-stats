@@ -1,5 +1,6 @@
 const axios = require('axios');
 const systeminformation = require('systeminformation');
+const pidusage = require('pidusage');
 const { status: minecraftStatus } = require('minecraft-server-util');
 
 const DEFAULT_IP = 'dxir.live';
@@ -7,6 +8,8 @@ const startedAt = Date.now();
 const rawBaseUrl = process.env.DXIR_STATS_URL || process.env.DXIR_STATS_ENDPOINT || process.env.VERCEL_URL || process.argv[2] || 'https://stats.dxir.live';
 const endpoint = normalizeEndpoint(rawBaseUrl);
 
+const GIGABYTE = 1024 * 1024 * 1024;
+const MEGABYTE = 1024 * 1024;
 
 let sending = false;
 
@@ -42,34 +45,98 @@ function formatTimestamp(date = new Date()) {
   });
 }
 
+function roundTo2(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
+function toGbFromBytes(bytes) {
+  return roundTo2(Number(bytes || 0) / GIGABYTE);
+}
+
+function parseXmxGb(command) {
+  const cmd = String(command || '');
+  const match = cmd.match(/-Xmx\s*(\d+)([MG])/i);
+
+  if (!match) {
+    return 0;
+  }
+
+  const value = Number(match[1]);
+  const unit = String(match[2] || '').toUpperCase();
+
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+
+  if (unit === 'G') {
+    return roundTo2(value);
+  }
+
+  if (unit === 'M') {
+    return roundTo2(value / 1024);
+  }
+
+  return 0;
+}
+
+function getProcessCommand(processInfo) {
+  return String(processInfo?.command || processInfo?.cmd || processInfo?.params || processInfo?.path || '');
+}
+
 async function getCpuUsage() {
   const load = await systeminformation.currentLoad();
   return Math.round(load.currentLoad * 10) / 10;
 }
 
-async function getJavaProcessRamUsage() {
+function findMinecraftJavaProcess(processes) {
+  const list = Array.isArray(processes?.list) ? processes.list : [];
+
+  const candidates = list.filter((processInfo) => {
+    const name = String(processInfo?.name || '').toLowerCase();
+    const command = getProcessCommand(processInfo).toLowerCase();
+
+    const isJava = name.includes('java');
+    const isMinecraftCommand = command.includes('server') || command.includes('minecraft') || command.includes('.jar');
+
+    return isJava && isMinecraftCommand;
+  });
+
+  if (!candidates.length) {
+    return null;
+  }
+
+  return candidates.sort((a, b) => Number(b?.memRss || b?.mem || 0) - Number(a?.memRss || a?.mem || 0))[0];
+}
+
+async function getMinecraftRamUsage() {
   try {
     const processes = await systeminformation.processes();
-    const candidates = Array.isArray(processes?.list) ? processes.list : [];
+    const javaProcess = findMinecraftJavaProcess(processes);
 
-    const javaProcess = candidates
-      .filter((processInfo) => {
-        const name = String(processInfo?.name || '').toLowerCase();
-        const command = String(processInfo?.command || processInfo?.cmd || processInfo?.path || '').toLowerCase();
-
-        return name.includes('java') || command.includes('java');
-      })
-      .sort((a, b) => Number(b?.memRss || 0) - Number(a?.memRss || 0))[0];
-
-    const memoryBytes = Number(javaProcess?.memRss || javaProcess?.mem || 0);
-
-    if (!Number.isFinite(memoryBytes) || memoryBytes <= 0) {
-      return 0;
+    if (!javaProcess?.pid) {
+      return {
+        usedRam: 0,
+        maxRam: 0,
+        usedRamMb: 0,
+      };
     }
 
-    return Math.round(memoryBytes / 1024 / 1024);
+    const usage = await pidusage(javaProcess.pid);
+    const memoryBytes = Number(usage?.memory || 0);
+    const usedRam = toGbFromBytes(memoryBytes);
+    const maxRam = parseXmxGb(getProcessCommand(javaProcess));
+
+    return {
+      usedRam,
+      maxRam,
+      usedRamMb: Math.round(memoryBytes / MEGABYTE),
+    };
   } catch (error) {
-    return 0;
+    return {
+      usedRam: 0,
+      maxRam: 0,
+      usedRamMb: 0,
+    };
   }
 }
 
@@ -98,15 +165,17 @@ async function getMinecraftStatus() {
 }
 
 async function buildPayload() {
-  const [cpu, ram, minecraft] = await Promise.all([
+  const [cpu, ramUsage, minecraft] = await Promise.all([
     getCpuUsage(),
-    getJavaProcessRamUsage(),
+    getMinecraftRamUsage(),
     getMinecraftStatus(),
   ]);
 
   return {
     cpu,
-    ram,
+    ram: ramUsage.usedRamMb,
+    ramUsed: ramUsage.usedRam,
+    ramMax: ramUsage.maxRam,
     players: minecraft.players,
     playerList: minecraft.playerList,
     uptime: Math.floor((Date.now() - startedAt) / 1000),
@@ -132,7 +201,9 @@ async function sendOnce() {
       },
     });
 
-    console.log(`[DXIR STATS] ${payload.status.toUpperCase()} | CPU ${payload.cpu}% | RAM ${payload.ram} MB | Players ${payload.players} | Uptime ${payload.uptime}s | ${response.status}`);
+    console.log(
+      `[DXIR STATS] ${payload.status.toUpperCase()} | CPU ${payload.cpu}% | RAM ${payload.ramUsed}/${payload.ramMax} GB | Players ${payload.players} | Uptime ${payload.uptime}s | ${response.status}`
+    );
   } catch (error) {
     const message = error?.response
       ? `HTTP ${error.response.status}`
@@ -154,7 +225,4 @@ main().catch((error) => {
   console.error('[DXIR STATS] Fatal error:', error);
   process.exit(1);
 });
-
-
-
 

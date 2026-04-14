@@ -377,13 +377,17 @@ function renderSnapshotValues(snapshot) {
   const players = Math.max(0, Math.floor(normalizeNumber(snapshot.players, 0)));
   const cpu = Math.max(0, normalizeNumber(snapshot.cpu, 0));
   const ram = Math.max(0, normalizeNumber(snapshot.ram, 0));
+  const ramUsed = Math.max(0, normalizeNumber(snapshot.ramUsed, ram / 1024));
+  const ramMax = Math.max(0, normalizeNumber(snapshot.ramMax, 0));
   const status = String(snapshot.status || 'offline').toLowerCase() === 'online' ? 'Online' : 'Offline';
   const ip = normalizeString(snapshot.ip, 'dxir.live');
 
   if (elements.uptimeValue) elements.uptimeValue.textContent = formatUptime(snapshot.uptime);
   if (elements.serverIpValue) elements.serverIpValue.textContent = ip;
   if (elements.cpuValue) elements.cpuValue.textContent = `${cpu.toFixed(cpu % 1 === 0 ? 0 : 1)}%`;
-  if (elements.ramValue) elements.ramValue.textContent = `${Math.round(ram)} MB`;
+  if (elements.ramValue) {
+    elements.ramValue.textContent = `${ramUsed.toFixed(2)} / ${ramMax.toFixed(2)} GB`;
+  }
   if (elements.playersValue) elements.playersValue.textContent = String(players);
   if (elements.serverValue) {
     elements.serverValue.textContent = status;

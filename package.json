@@ -13,8 +13,7 @@
   "dependencies": {
     "axios": "^1.15.0",
     "minecraft-server-util": "^5.0.0",
+    "pidusage": "^4.0.1",
     "systeminformation": "^5.31.0"
   }
 }
-
-
