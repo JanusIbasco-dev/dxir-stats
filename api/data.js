@@ -11,6 +11,10 @@ const {
   withState,
 } = require('./_state');
 
+const UUID_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const MOJANG_PROFILE_URL = 'https://api.mojang.com/users/profiles/minecraft/';
+const uuidCache = new Map();
+
 const defaultSnapshot = {
   cpu: 0,
   ram: 0,
@@ -42,10 +46,63 @@ function normalizeNumber(value, fallback = 0) {
   return parsed >= 0 ? parsed : fallback;
 }
 
-function normalizePlayerEntry(value) {
+function normalizeUuid(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) {
+    return '';
+  }
+
+  const compact = raw.replace(/-/g, '');
+  return /^[0-9a-f]{32}$/.test(compact) ? compact : '';
+}
+
+async function resolveUuidFromMojang(username) {
+  const key = String(username || '').trim().toLowerCase();
+  if (!key) {
+    return '';
+  }
+
+  const now = Date.now();
+  const cached = uuidCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return cached.uuid;
+  }
+
+  try {
+    const response = await fetch(`${MOJANG_PROFILE_URL}${encodeURIComponent(key)}`, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      uuidCache.set(key, { uuid: '', expiresAt: now + 60 * 1000 });
+      return '';
+    }
+
+    const payload = await response.json();
+    const uuid = normalizeUuid(payload?.id);
+    uuidCache.set(key, {
+      uuid,
+      expiresAt: now + UUID_CACHE_TTL_MS,
+    });
+    return uuid;
+  } catch (error) {
+    uuidCache.set(key, { uuid: '', expiresAt: now + 60 * 1000 });
+    return '';
+  }
+}
+
+async function normalizePlayerEntry(value) {
   if (typeof value === 'string') {
     const name = value.trim();
-    return name ? { name, uuid: '', ping: 0, status: 'online' } : null;
+    if (!name) {
+      return null;
+    }
+
+    const uuid = await resolveUuidFromMojang(name);
+    return { name, uuid, ping: 0, status: 'online' };
   }
 
   if (!value || typeof value !== 'object') {
@@ -53,15 +110,17 @@ function normalizePlayerEntry(value) {
   }
 
   const name = String(value.name || value.player || value.username || '').trim();
-  const uuid = String(value.uuid || value.id || value.playerUuid || '').trim();
+  const uuid = normalizeUuid(value.uuid || value.id || value.playerUuid);
 
   if (!name) {
     return null;
   }
 
+  const resolvedUuid = uuid || await resolveUuidFromMojang(name);
+
   return {
     name,
-    uuid,
+    uuid: resolvedUuid,
     ping: normalizeNumber(value.ping ?? value.latency ?? value.ms, 0),
     status: String(value.status || 'online').trim() || 'online',
     lastActive: normalizeNumber(value.lastActive ?? value.activityAt, 0),
@@ -69,18 +128,16 @@ function normalizePlayerEntry(value) {
   };
 }
 
-function normalizePlayerList(value) {
+async function normalizePlayerList(value) {
   if (!Array.isArray(value)) {
     return [];
   }
 
-  return value
-    .map(normalizePlayerEntry)
-    .filter(Boolean)
-    .slice(0, 32);
+  const normalized = await Promise.all(value.map(normalizePlayerEntry));
+  return normalized.filter(Boolean).slice(0, 32);
 }
 
-function normalizePayload(payload = {}) {
+async function normalizePayload(payload = {}) {
   const ramUsed = normalizeNumber(payload.ramUsed, defaultSnapshot.ramUsed);
 
   return {
@@ -89,7 +146,7 @@ function normalizePayload(payload = {}) {
     ramUsed,
     ramMax: normalizeNumber(payload.ramMax, defaultSnapshot.ramMax),
     players: normalizeNumber(payload.players, defaultSnapshot.players),
-    playerList: normalizePlayerList(payload.playerList),
+    playerList: await normalizePlayerList(payload.playerList),
     uptime: normalizeNumber(payload.uptime, defaultSnapshot.uptime),
     ip: typeof payload.ip === 'string' && payload.ip.trim() ? payload.ip.trim() : defaultSnapshot.ip,
     status: normalizeStatus(payload.status),
@@ -302,7 +359,8 @@ module.exports = async (req, res) => {
   if (req.method === 'POST') {
     try {
       const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
-      await storeSnapshot(normalizePayload(body));
+      const normalizedPayload = await normalizePayload(body);
+      await storeSnapshot(normalizedPayload);
       const data = await currentData();
 
       return res.status(200).json({

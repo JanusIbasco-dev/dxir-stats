@@ -9,14 +9,18 @@ const state = {
   pollTimer: null,
   leaderboardTimer: null,
   chart: null,
+  chartResizeTimer: null,
   maxPoints: 50,
   lastSeenUpdate: 0,
   lastFreshAt: 0,
   lastChartSignature: '',
   players: [],
+  expandedPlayers: new Set(),
   playerNodeMap: new Map(),
   playerAvatarCache: new Map(),
   leaderboardAvatarCache: new Map(),
+  leaderboardsReady: false,
+  leaderboardObserver: null,
   leaderboards: {
     kills: { signature: '' },
     balance: { signature: '' },
@@ -175,6 +179,25 @@ function getChartPalette() {
   };
 }
 
+function isCompactViewport() {
+  return window.matchMedia('(max-width: 768px)').matches;
+}
+
+function syncChartDensity() {
+  if (!state.chart) {
+    return;
+  }
+
+  const compact = isCompactViewport();
+  state.chart.options.plugins.legend.labels.padding = compact ? 10 : 16;
+  state.chart.options.plugins.legend.labels.boxWidth = compact ? 8 : 10;
+  state.chart.options.plugins.legend.labels.boxHeight = compact ? 8 : 10;
+  state.chart.options.scales.x.ticks.maxTicksLimit = compact ? 6 : 12;
+  state.chart.options.scales.y.ticks.maxTicksLimit = compact ? 4 : 6;
+  state.chart.options.scales.y1.ticks.maxTicksLimit = compact ? 4 : 6;
+  state.chart.update('none');
+}
+
 function syncChartTheme() {
   if (!state.chart) {
     return;
@@ -194,7 +217,7 @@ function syncChartTheme() {
   state.chart.options.scales.y1.ticks.color = palette.ticks;
   state.chart.options.plugins.tooltip.backgroundColor = palette.tooltipBg;
   state.chart.options.plugins.tooltip.borderColor = palette.tooltipBorder;
-  state.chart.update('none');
+  syncChartDensity();
 }
 
 function initChart() {
@@ -276,6 +299,8 @@ function initChart() {
       },
     },
   });
+
+  syncChartDensity();
 }
 
 function buildHistorySignature(history) {
@@ -337,7 +362,7 @@ function normalizePlayer(raw) {
 
   return {
     key,
-    uuid,
+    uuid: normalizeUuid(uuid),
     name,
     ping: Math.max(0, normalizeNumber(raw.ping, 0)),
     status: String(raw.status || 'online').toLowerCase() === 'offline' ? 'offline' : 'online',
@@ -349,38 +374,75 @@ function normalizePlayer(raw) {
   };
 }
 
+function normalizeUuid(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) {
+    return '';
+  }
+
+  const compact = raw.replace(/-/g, '');
+  return /^[0-9a-f]{32}$/.test(compact) ? compact : '';
+}
+
+function buildAvatarCandidates(sourceId, fallbackName, size) {
+  const uuid = normalizeUuid(sourceId);
+  const username = String(fallbackName || '').trim();
+  const candidates = [];
+
+  if (uuid) {
+    candidates.push(`https://mc-heads.net/avatar/${uuid}/${size}`);
+    candidates.push(`https://crafatar.com/avatars/${uuid}?size=${size}&overlay`);
+  }
+
+  if (username) {
+    candidates.push(`https://minotar.net/avatar/${encodeURIComponent(username)}/${size}`);
+  }
+
+  return candidates;
+}
+
 function configureAvatarImage(image, cacheMap, cacheKey, sourceId, fallbackName, size = 64) {
   if (!image || !cacheMap || !cacheKey) {
     return;
   }
 
-  const primary = sourceId
-    ? `https://mc-heads.net/avatar/${encodeURIComponent(sourceId)}/${size}`
-    : '';
-  const fallback = fallbackName
-    ? `https://minotar.net/avatar/${encodeURIComponent(fallbackName)}/${size}`
-    : '';
+  const candidates = buildAvatarCandidates(sourceId, fallbackName, size);
+  const fallback = candidates[candidates.length - 1] || '';
   const cached = cacheMap.get(cacheKey) || '';
-  const next = cached || primary || fallback;
+  const next = cached || candidates[0] || fallback;
 
   if (!next) {
     return;
   }
 
+  if (image.dataset.avatarCurrent === next && image.complete && image.naturalWidth > 0) {
+    image.classList.add('loaded');
+    return;
+  }
+
   image.classList.remove('loaded');
+  image.dataset.avatarCurrent = next;
+
   if (image.src !== next) {
     image.src = next;
   }
 
+  let index = Math.max(0, candidates.indexOf(next));
+
   image.onload = () => {
     cacheMap.set(cacheKey, image.src || next);
+    image.dataset.avatarCurrent = image.src || next;
     image.classList.add('loaded');
   };
 
   image.onerror = () => {
-    if (fallback && image.src !== fallback) {
-      cacheMap.set(cacheKey, fallback);
-      image.src = fallback;
+    index += 1;
+    const nextCandidate = candidates[index] || '';
+
+    if (nextCandidate) {
+      cacheMap.set(cacheKey, nextCandidate);
+      image.dataset.avatarCurrent = nextCandidate;
+      image.src = nextCandidate;
       return;
     }
 
@@ -442,11 +504,18 @@ function createPlayerCard(player) {
   const session = document.createElement('span');
   session.className = 'meta-pill';
 
+  const expand = document.createElement('button');
+  expand.type = 'button';
+  expand.className = 'player-expand';
+  expand.dataset.playerToggle = player.key;
+  expand.textContent = 'More';
+
   rowOne.appendChild(ping);
   rowOne.appendChild(session);
+  rowOne.appendChild(expand);
 
   const rowTwo = document.createElement('div');
-  rowTwo.className = 'player-meta-row';
+  rowTwo.className = 'player-meta-row player-extra';
 
   const total = document.createElement('span');
   total.className = 'meta-pill';
@@ -475,6 +544,8 @@ function updatePlayerCard(card, player) {
   const dot = card.querySelector('.player-status-dot');
   const statusText = card.querySelector('.player-status-text');
   const pills = card.querySelectorAll('.meta-pill');
+  const expand = card.querySelector('.player-expand');
+  const isExpanded = state.expandedPlayers.has(player.key);
 
   if (name) {
     name.textContent = player.name;
@@ -499,6 +570,14 @@ function updatePlayerCard(card, player) {
   if (pills[3]) pills[3].textContent = `Daily: ${formatUptime(player.dailyPlaytime)}`;
   if (pills[4]) pills[4].textContent = `Weekly: ${formatUptime(player.weeklyPlaytime)}`;
 
+  if (expand) {
+    expand.dataset.playerToggle = player.key;
+    expand.textContent = isExpanded ? 'Less' : 'More';
+    expand.setAttribute('aria-expanded', String(isExpanded));
+  }
+
+  card.classList.toggle('is-expanded', isExpanded);
+
   if (avatar) {
     configureAvatarImage(
       avatar,
@@ -522,6 +601,7 @@ function renderPlayers(players) {
     empty.textContent = 'No players online';
     elements.playerList.replaceChildren(empty);
     state.playerNodeMap.clear();
+    state.expandedPlayers.clear();
     return;
   }
 
@@ -532,6 +612,7 @@ function renderPlayers(players) {
     if (!nextKeys.has(key)) {
       node.remove();
       existing.delete(key);
+      state.expandedPlayers.delete(key);
     }
   });
 
@@ -578,6 +659,9 @@ function renderLeaderboardCategory(name, items, loading = false) {
   }
 
   if (loading && !items.length) {
+    if (state.leaderboards[name].signature) {
+      return;
+    }
     list.innerHTML = '<div class="mini-empty">Loading...</div>';
     return;
   }
@@ -664,10 +748,17 @@ async function fetchCategory(name, endpoint) {
 }
 
 async function fetchLeaderboards() {
-  renderLeaderboardCategory('kills', [], true);
-  renderLeaderboardCategory('balance', [], true);
-  renderLeaderboardCategory('bounty', [], true);
-  renderLeaderboardCategory('earnings', [], true);
+  const firstLoad = !state.leaderboards.kills.signature
+    && !state.leaderboards.balance.signature
+    && !state.leaderboards.bounty.signature
+    && !state.leaderboards.earnings.signature;
+
+  if (firstLoad) {
+    renderLeaderboardCategory('kills', [], true);
+    renderLeaderboardCategory('balance', [], true);
+    renderLeaderboardCategory('bounty', [], true);
+    renderLeaderboardCategory('earnings', [], true);
+  }
 
   await Promise.all([
     fetchCategory('kills', '/api/leaderboard/kills'),
@@ -675,6 +766,46 @@ async function fetchLeaderboards() {
     fetchCategory('bounty', '/api/leaderboard/bounty'),
     fetchCategory('earnings', '/api/leaderboard/earnings'),
   ]);
+}
+
+function setupLeaderboardLazyLoad() {
+  const section = document.querySelector('.dashboard-leaderboards');
+
+  if (!section) {
+    state.leaderboardsReady = true;
+    fetchLeaderboards();
+    return;
+  }
+
+  const trigger = () => {
+    if (state.leaderboardsReady) {
+      return;
+    }
+
+    state.leaderboardsReady = true;
+    fetchLeaderboards();
+
+    if (state.leaderboardObserver) {
+      state.leaderboardObserver.disconnect();
+      state.leaderboardObserver = null;
+    }
+  };
+
+  if (!('IntersectionObserver' in window)) {
+    trigger();
+    return;
+  }
+
+  state.leaderboardObserver = new IntersectionObserver((entries) => {
+    const visible = entries.some((entry) => entry.isIntersecting);
+    if (visible) {
+      trigger();
+    }
+  }, {
+    rootMargin: '120px',
+  });
+
+  state.leaderboardObserver.observe(section);
 }
 
 function renderLoading() {
@@ -808,9 +939,13 @@ async function fetchStats() {
 
 function startPolling() {
   fetchStats();
-  fetchLeaderboards();
+  setupLeaderboardLazyLoad();
   state.pollTimer = window.setInterval(fetchStats, POLL_INTERVAL_MS);
-  state.leaderboardTimer = window.setInterval(fetchLeaderboards, LEADERBOARD_INTERVAL_MS);
+  state.leaderboardTimer = window.setInterval(() => {
+    if (state.leaderboardsReady) {
+      fetchLeaderboards();
+    }
+  }, LEADERBOARD_INTERVAL_MS);
 }
 
 function bindEvents() {
@@ -819,6 +954,41 @@ function bindEvents() {
       applyTheme(state.theme === 'light' ? 'dark' : 'light');
     });
   }
+
+  if (elements.playerList) {
+    elements.playerList.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-player-toggle]');
+      if (!button) {
+        return;
+      }
+
+      const playerKey = String(button.dataset.playerToggle || '').trim();
+      if (!playerKey) {
+        return;
+      }
+
+      if (state.expandedPlayers.has(playerKey)) {
+        state.expandedPlayers.delete(playerKey);
+      } else {
+        state.expandedPlayers.add(playerKey);
+      }
+
+      const card = state.playerNodeMap.get(playerKey);
+      const player = state.players.find((entry) => entry.key === playerKey);
+
+      if (card && player) {
+        updatePlayerCard(card, player);
+      }
+    });
+  }
+
+  window.addEventListener('resize', () => {
+    if (state.chartResizeTimer) {
+      window.clearTimeout(state.chartResizeTimer);
+    }
+
+    state.chartResizeTimer = window.setTimeout(syncChartDensity, 120);
+  });
 }
 
 document.addEventListener('DOMContentLoaded', () => {
