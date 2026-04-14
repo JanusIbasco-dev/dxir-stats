@@ -186,19 +186,64 @@ function syncChartTheme() {
   state.chart.update('none');
 }
 
+function getPlayerAvatarUrl(username) {
+  return `https://crafatar.com/avatars/${encodeURIComponent(String(username || '').trim())}?size=64&overlay`;
+}
+
 function renderPlayerList(playerList) {
   if (!elements.playerList) {
     return;
   }
 
-  const players = Array.isArray(playerList) ? playerList.filter(Boolean) : [];
+  const players = Array.isArray(playerList)
+    ? playerList
+      .map((player) => String(player || '').trim())
+      .filter(Boolean)
+    : [];
+
+  elements.playerList.innerHTML = '';
 
   if (!players.length) {
-    elements.playerList.innerHTML = '<div class="empty-state">No players online</div>';
+    const empty = document.createElement('div');
+    empty.className = 'empty-state empty-state--players';
+    empty.textContent = 'No players online';
+    elements.playerList.appendChild(empty);
     return;
   }
 
-  elements.playerList.innerHTML = players.map((player) => `<span class="player-chip">${player}</span>`).join('');
+  const fragment = document.createDocumentFragment();
+
+  players.forEach((player) => {
+    const item = document.createElement('div');
+    item.className = 'player-item';
+
+    const avatar = document.createElement('img');
+    avatar.className = 'player-avatar';
+    avatar.src = getPlayerAvatarUrl(player);
+    avatar.alt = `${player} avatar`;
+    avatar.width = 38;
+    avatar.height = 38;
+    avatar.loading = 'lazy';
+    avatar.decoding = 'async';
+    avatar.referrerPolicy = 'no-referrer';
+    avatar.addEventListener('error', () => {
+      avatar.src = 'https://crafatar.com/avatars/8667ba71-b85a-4004-af54-457a9734eed7?size=64&overlay';
+    }, { once: true });
+
+    const info = document.createElement('div');
+    info.className = 'player-info';
+
+    const name = document.createElement('span');
+    name.className = 'player-name';
+    name.textContent = player;
+
+    info.appendChild(name);
+    item.appendChild(avatar);
+    item.appendChild(info);
+    fragment.appendChild(item);
+  });
+
+  elements.playerList.appendChild(fragment);
 }
 
 function initChart() {
