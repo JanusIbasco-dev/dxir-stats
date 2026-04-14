@@ -1,12 +1,10 @@
 const state = {
   hasData: false,
   timer: null,
-  ageTimer: null,
   chart: null,
   maxPoints: 50,
   lastHistorySignature: '',
   lastAppliedUpdate: 0,
-  lastSnapshot: null,
   theme: 'dark',
 };
 
@@ -58,18 +56,9 @@ function isSnapshotFresh(snapshot, now = Date.now()) {
   return lastUpdate > 0 && now - lastUpdate <= OFFLINE_THRESHOLD;
 }
 
-function formatLastUpdated(lastUpdate, now = Date.now()) {
-  if (!lastUpdate) {
-    return 'Last updated: --';
-  }
-
-  const secondsAgo = Math.max(0, Math.floor((now - lastUpdate) / 1000));
-  return `Last updated: ${secondsAgo} seconds ago`;
-}
-
-function renderLastUpdated(lastUpdate) {
+function renderLastUpdated(snapshot) {
   if (elements.timeValue) {
-    elements.timeValue.textContent = formatLastUpdated(lastUpdate);
+    elements.timeValue.textContent = snapshot?.time || '--';
   }
 }
 
@@ -110,6 +99,26 @@ function formatUptime(seconds) {
   ]
     .filter(Boolean)
     .join(' ');
+}
+
+function renderSnapshotValues(snapshot) {
+  const players = Math.max(0, Math.floor(normalizeNumber(snapshot.players, 0)));
+  const cpu = Math.max(0, normalizeNumber(snapshot.cpu, 0));
+  const ram = Math.max(0, normalizeNumber(snapshot.ram, 0));
+  const serverState = String(snapshot.status || 'offline').toLowerCase() === 'online' ? 'online' : 'offline';
+  const ip = normalizeString(snapshot.ip, 'dxir.live');
+
+  if (elements.uptimeValue) elements.uptimeValue.textContent = formatUptime(snapshot.uptime);
+  if (elements.serverIpValue) elements.serverIpValue.textContent = ip;
+  if (elements.cpuValue) elements.cpuValue.textContent = `${cpu.toFixed(cpu % 1 === 0 ? 0 : 1)}%`;
+  if (elements.ramValue) elements.ramValue.textContent = `${Math.round(ram)} MB`;
+  if (elements.playersValue) elements.playersValue.textContent = String(players);
+  if (elements.serverValue) {
+    elements.serverValue.textContent = serverState === 'online' ? 'Online' : 'Offline';
+    elements.serverValue.dataset.state = serverState;
+  }
+
+  return { players, cpu, ram, serverState, ip };
 }
 
 function setConnectionState(stateName, label) {
@@ -429,7 +438,7 @@ function renderData(payload) {
     } else {
       setConnectionState('offline', 'Offline');
       setChartOpacity(true);
-      renderLastUpdated(state.lastAppliedUpdate);
+      renderLastUpdated(state.lastSnapshot);
       if (elements.apiMessage) {
         elements.apiMessage.textContent = 'No recent data received';
       }
@@ -445,27 +454,17 @@ function renderData(payload) {
       state.lastSnapshot = snapshot;
       state.lastAppliedUpdate = lastUpdate || state.lastAppliedUpdate;
 
-      const serverState = String(snapshot.status || 'offline').toLowerCase() === 'online' ? 'online' : 'offline';
-      const players = Math.max(0, Math.floor(normalizeNumber(snapshot.players, 0)));
-      const cpu = Math.max(0, normalizeNumber(snapshot.cpu, 0));
-      const ram = Math.max(0, normalizeNumber(snapshot.ram, 0));
-      const ip = normalizeString(snapshot.ip, 'dxir.live');
-
       setLoadingNodes(false);
       setConnectionState('offline', 'Offline');
       setChartOpacity(true);
 
-      if (elements.uptimeValue) elements.uptimeValue.textContent = formatUptime(snapshot.uptime);
-      if (elements.serverIpValue) elements.serverIpValue.textContent = ip;
-      if (elements.cpuValue) elements.cpuValue.textContent = `${cpu.toFixed(cpu % 1 === 0 ? 0 : 1)}%`;
-      if (elements.ramValue) elements.ramValue.textContent = `${Math.round(ram)} MB`;
-      if (elements.playersValue) elements.playersValue.textContent = String(players);
+      renderSnapshotValues(snapshot);
       if (elements.serverValue) {
         elements.serverValue.textContent = 'Offline';
         elements.serverValue.dataset.state = 'offline';
       }
 
-      renderLastUpdated(lastUpdate);
+      renderLastUpdated(snapshot);
       renderPlayerList(snapshot.playerList);
       applyHistoryToChart(Array.isArray(history) ? history : [snapshot]);
       if (elements.apiMessage) {
@@ -474,7 +473,7 @@ function renderData(payload) {
     } else {
       setConnectionState('offline', 'Offline');
       setChartOpacity(true);
-      renderLastUpdated(state.lastAppliedUpdate);
+      renderLastUpdated(state.lastSnapshot);
       if (elements.apiMessage) {
         elements.apiMessage.textContent = 'No recent data received';
       }
@@ -491,33 +490,17 @@ function renderData(payload) {
   }
 
   state.hasData = true;
-  state.lastSnapshot = snapshot;
   state.lastAppliedUpdate = lastUpdate;
   setLoadingNodes(false);
 
-  const serverState = String(snapshot.status || 'offline').toLowerCase() === 'online' ? 'online' : 'offline';
-  const players = Math.max(0, Math.floor(normalizeNumber(snapshot.players, 0)));
-  const cpu = Math.max(0, normalizeNumber(snapshot.cpu, 0));
-  const ram = Math.max(0, normalizeNumber(snapshot.ram, 0));
-  const uptime = formatUptime(snapshot.uptime);
-  const ip = normalizeString(snapshot.ip, 'dxir.live');
+  const { serverState } = renderSnapshotValues(snapshot);
 
   setConnectionState(serverState, serverState === 'online' ? 'Online' : 'Offline');
-
-  if (elements.uptimeValue) elements.uptimeValue.textContent = uptime;
-  if (elements.serverIpValue) elements.serverIpValue.textContent = ip;
-  if (elements.cpuValue) elements.cpuValue.textContent = `${cpu.toFixed(cpu % 1 === 0 ? 0 : 1)}%`;
-  if (elements.ramValue) elements.ramValue.textContent = `${Math.round(ram)} MB`;
-  if (elements.playersValue) elements.playersValue.textContent = String(players);
-  if (elements.serverValue) {
-    elements.serverValue.textContent = serverState === 'online' ? 'Online' : 'Offline';
-    elements.serverValue.dataset.state = serverState;
-  }
   if (elements.apiMessage) {
     elements.apiMessage.textContent = `History loaded: ${Array.isArray(history) ? history.length : 0} entries.`;
   }
 
-  renderLastUpdated(lastUpdate);
+  renderLastUpdated(snapshot);
   renderPlayerList(snapshot.playerList);
   applyHistoryToChart(Array.isArray(history) ? history : [snapshot]);
   setChartOpacity(false);
@@ -559,21 +542,6 @@ async function fetchStats() {
 function startPolling() {
   fetchStats();
   state.timer = window.setInterval(fetchStats, 2000);
-  state.ageTimer = window.setInterval(() => {
-    if (!state.lastAppliedUpdate) {
-      return;
-    }
-
-    renderLastUpdated(state.lastAppliedUpdate);
-
-    if (Date.now() - state.lastAppliedUpdate > OFFLINE_THRESHOLD) {
-      setConnectionState('offline', 'Offline');
-      setChartOpacity(true);
-      if (elements.apiMessage) {
-        elements.apiMessage.textContent = 'No recent data received';
-      }
-    }
-  }, 1000);
 }
 
 function bindEvents() {
