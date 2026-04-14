@@ -1,28 +1,28 @@
 const POLL_INTERVAL_MS = 2000;
-const PLAYTIME_REFRESH_MS = 8000;
-const PLAYTIME_TICK_MS = 1000;
+const LEADERBOARD_INTERVAL_MS = 10000;
 const OFFLINE_THRESHOLD_MS = 8000;
-const PLAYER_RENDER_THROTTLE_MS = 140;
 const THEME_STORAGE_KEY = 'dxir-theme';
 
 const state = {
   hasData: false,
+  theme: 'dark',
   pollTimer: null,
-  playtimeFetchTimer: null,
-  playtimeTickTimer: null,
+  leaderboardTimer: null,
   chart: null,
   maxPoints: 50,
   lastSeenUpdate: 0,
   lastFreshAt: 0,
   lastChartSignature: '',
-  theme: 'dark',
   players: [],
   playerNodeMap: new Map(),
-  playerStatsMap: new Map(),
   playerAvatarCache: new Map(),
-  selectedPlayerKey: '',
-  pendingPlayerRender: null,
-  playerRenderAt: 0,
+  leaderboardAvatarCache: new Map(),
+  leaderboards: {
+    kills: { signature: '' },
+    balance: { signature: '' },
+    bounty: { signature: '' },
+    earnings: { signature: '' },
+  },
 };
 
 const elements = {
@@ -35,23 +35,19 @@ const elements = {
   cpuValue: document.getElementById('cpuValue'),
   ramValue: document.getElementById('ramValue'),
   playersValue: document.getElementById('playersValue'),
+  playersCountMirror: document.getElementById('playersCountMirror'),
   serverValue: document.getElementById('serverValue'),
   timeValue: document.getElementById('timeValue'),
   apiMessage: document.getElementById('apiMessage'),
   playerList: document.getElementById('playerList'),
-  playerHoverCard: document.getElementById('playerHoverCard'),
-  playerHoverPlaceholder: document.getElementById('playerHoverPlaceholder'),
-  playerHoverContent: document.getElementById('playerHoverContent'),
-  playerHoverAvatar: document.getElementById('playerHoverAvatar'),
-  playerHoverName: document.getElementById('playerHoverName'),
-  playerHoverStatus: document.getElementById('playerHoverStatus'),
-  playerHoverPing: document.getElementById('playerHoverPing'),
-  playerHoverSession: document.getElementById('playerHoverSession'),
-  playerHoverTotal: document.getElementById('playerHoverTotal'),
-  playerHoverDaily: document.getElementById('playerHoverDaily'),
-  playerHoverWeekly: document.getElementById('playerHoverWeekly'),
   chartCanvas: document.getElementById('usageChart'),
-  chartCard: document.getElementById('usageChart')?.closest('.chart-card'),
+  chartCard: document.querySelector('.chart-card'),
+  leaderboardLists: {
+    kills: document.getElementById('killsLeaderboardList'),
+    balance: document.getElementById('balanceLeaderboardList'),
+    bounty: document.getElementById('bountyLeaderboardList'),
+    earnings: document.getElementById('earningsLeaderboardList'),
+  },
 };
 
 const chartState = {
@@ -71,27 +67,31 @@ function normalizeString(value, fallback = '--') {
 }
 
 function formatUptime(seconds) {
-  const totalSeconds = Math.max(0, Math.floor(Number(seconds) || 0));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const secs = totalSeconds % 60;
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
 
-  if (totalSeconds < 60) {
+  if (total < 60) {
     return `${secs}s`;
   }
 
   return [hours > 0 ? `${hours}h` : null, `${minutes}m`, `${secs}s`].filter(Boolean).join(' ');
 }
 
-function formatSecondsAgo(timestampMs) {
-  const delta = Math.max(0, Math.floor((Date.now() - Number(timestampMs || 0)) / 1000));
-  if (delta < 60) {
-    return `${delta}s ago`;
+function formatElapsed(ms) {
+  const totalSeconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s ago`;
   }
 
-  const mins = Math.floor(delta / 60);
-  const secs = delta % 60;
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
   return `${mins}m ${secs}s ago`;
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(Number(value || 0));
 }
 
 function getThemeFromStorage() {
@@ -144,7 +144,7 @@ function setConnectionState(stateName, label) {
 
 function setChartOpacity(isOffline) {
   if (elements.chartCard) {
-    elements.chartCard.style.opacity = isOffline ? '0.72' : '1';
+    elements.chartCard.style.opacity = isOffline ? '0.78' : '1';
   }
 }
 
@@ -155,7 +155,7 @@ function getCssVar(name) {
 function hexToRgba(hex, alpha) {
   const value = String(hex || '').trim().replace('#', '');
   if (value.length !== 6) {
-    return `rgba(124, 58, 237, ${alpha})`;
+    return `rgba(139, 92, 246, ${alpha})`;
   }
 
   const r = Number.parseInt(value.slice(0, 2), 16);
@@ -168,7 +168,7 @@ function getChartPalette() {
   return {
     cpu: getCssVar('--chart-cpu') || '#7C3AED',
     ram: getCssVar('--chart-ram') || '#8B5CF6',
-    grid: getCssVar('--chart-grid') || 'rgba(148, 163, 184, 0.14)',
+    grid: getCssVar('--chart-grid') || 'rgba(148, 163, 184, 0.18)',
     ticks: getCssVar('--chart-ticks') || '#94A3B8',
     tooltipBg: getCssVar('--chart-tooltip-bg') || '#111827',
     tooltipBorder: getCssVar('--chart-tooltip-border') || 'rgba(148, 163, 184, 0.2)',
@@ -182,9 +182,8 @@ function syncChartTheme() {
 
   const palette = getChartPalette();
   const [cpuDataset, ramDataset] = state.chart.data.datasets;
-
   cpuDataset.borderColor = palette.cpu;
-  cpuDataset.backgroundColor = hexToRgba(palette.cpu, 0.15);
+  cpuDataset.backgroundColor = hexToRgba(palette.cpu, 0.16);
   ramDataset.borderColor = palette.ram;
   ramDataset.backgroundColor = hexToRgba(palette.ram, 0.12);
 
@@ -214,9 +213,9 @@ function initChart() {
           data: chartState.cpuData,
           yAxisID: 'y',
           borderColor: palette.cpu,
-          backgroundColor: hexToRgba(palette.cpu, 0.15),
+          backgroundColor: hexToRgba(palette.cpu, 0.16),
           fill: true,
-          tension: 0.32,
+          tension: 0.35,
           borderWidth: 2,
           pointRadius: 0,
         },
@@ -227,7 +226,7 @@ function initChart() {
           borderColor: palette.ram,
           backgroundColor: hexToRgba(palette.ram, 0.12),
           fill: true,
-          tension: 0.32,
+          tension: 0.35,
           borderWidth: 2,
           pointRadius: 0,
         },
@@ -240,7 +239,13 @@ function initChart() {
       plugins: {
         legend: {
           position: 'bottom',
-          labels: { color: palette.ticks, usePointStyle: true, boxWidth: 10, boxHeight: 10, padding: 16 },
+          labels: {
+            color: palette.ticks,
+            usePointStyle: true,
+            boxWidth: 10,
+            boxHeight: 10,
+            padding: 16,
+          },
         },
         tooltip: {
           backgroundColor: palette.tooltipBg,
@@ -252,9 +257,22 @@ function initChart() {
         },
       },
       scales: {
-        x: { ticks: { color: palette.ticks }, grid: { color: palette.grid } },
-        y: { beginAtZero: true, suggestedMax: 100, ticks: { color: palette.ticks }, grid: { color: palette.grid } },
-        y1: { beginAtZero: true, position: 'right', ticks: { color: palette.ticks }, grid: { drawOnChartArea: false } },
+        x: {
+          ticks: { color: palette.ticks, autoSkip: true, maxRotation: 0 },
+          grid: { color: palette.grid },
+        },
+        y: {
+          beginAtZero: true,
+          suggestedMax: 100,
+          ticks: { color: palette.ticks },
+          grid: { color: palette.grid },
+        },
+        y1: {
+          beginAtZero: true,
+          position: 'right',
+          ticks: { color: palette.ticks },
+          grid: { drawOnChartArea: false },
+        },
       },
     },
   });
@@ -271,14 +289,15 @@ function applyHistoryToChart(history) {
 
   const points = Array.isArray(history) ? history.slice(-state.maxPoints) : [];
   const signature = buildHistorySignature(points);
+
   if (signature === state.lastChartSignature) {
     return;
   }
 
   state.lastChartSignature = signature;
-  chartState.labels = points.map((point) => normalizeString(point.time, '--'));
-  chartState.cpuData = points.map((point) => normalizeNumber(point.cpu, 0));
-  chartState.ramData = points.map((point) => normalizeNumber(point.ram, 0));
+  chartState.labels = points.map((item) => normalizeString(item.time, '--'));
+  chartState.cpuData = points.map((item) => normalizeNumber(item.cpu, 0));
+  chartState.ramData = points.map((item) => normalizeNumber(item.ram, 0));
 
   state.chart.data.labels = [...chartState.labels];
   state.chart.data.datasets[0].data = [...chartState.cpuData];
@@ -289,19 +308,27 @@ function applyHistoryToChart(history) {
 function unwrapApiPayload(payload) {
   const root = payload && typeof payload === 'object' ? payload : {};
   const data = root.data && typeof root.data === 'object' ? root.data : root;
+
   if (data && typeof data === 'object' && ('latest' in data || Array.isArray(data.history))) {
-    return { latest: data.latest || null, history: Array.isArray(data.history) ? data.history : [] };
+    return {
+      latest: data.latest && typeof data.latest === 'object' ? data.latest : null,
+      history: Array.isArray(data.history) ? data.history : [],
+    };
   }
-  return { latest: data || null, history: Array.isArray(root.history) ? root.history : [] };
+
+  return {
+    latest: data && typeof data === 'object' ? data : null,
+    history: Array.isArray(root.history) ? root.history : [],
+  };
 }
 
-function normalizePlayer(rawPlayer) {
-  if (!rawPlayer || typeof rawPlayer !== 'object') {
+function normalizePlayer(raw) {
+  if (!raw || typeof raw !== 'object') {
     return null;
   }
 
-  const name = String(rawPlayer.name || rawPlayer.username || rawPlayer.player || '').trim();
-  const uuid = String(rawPlayer.uuid || rawPlayer.id || '').trim();
+  const name = String(raw.name || raw.username || raw.player || '').trim();
+  const uuid = String(raw.uuid || raw.id || '').trim();
   const key = uuid || name.toLowerCase();
 
   if (!name || !key) {
@@ -312,46 +339,48 @@ function normalizePlayer(rawPlayer) {
     key,
     uuid,
     name,
-    status: String(rawPlayer.status || 'online').toLowerCase() === 'offline' ? 'offline' : 'online',
-    ping: Math.max(0, normalizeNumber(rawPlayer.ping, 0)),
-    isAFK: Boolean(rawPlayer.isAFK),
-    sessionTime: Math.max(0, Math.floor(normalizeNumber(rawPlayer.sessionTime, 0))),
-    totalPlaytime: Math.max(0, Math.floor(normalizeNumber(rawPlayer.totalPlaytime, 0))),
-    dailyPlaytime: Math.max(0, Math.floor(normalizeNumber(rawPlayer.dailyPlaytime, 0))),
-    weeklyPlaytime: Math.max(0, Math.floor(normalizeNumber(rawPlayer.weeklyPlaytime, 0))),
+    ping: Math.max(0, normalizeNumber(raw.ping, 0)),
+    status: String(raw.status || 'online').toLowerCase() === 'offline' ? 'offline' : 'online',
+    isAFK: Boolean(raw.isAFK),
+    sessionTime: Math.max(0, Math.floor(normalizeNumber(raw.sessionTime, 0))),
+    totalPlaytime: Math.max(0, Math.floor(normalizeNumber(raw.totalPlaytime, 0))),
+    dailyPlaytime: Math.max(0, Math.floor(normalizeNumber(raw.dailyPlaytime, 0))),
+    weeklyPlaytime: Math.max(0, Math.floor(normalizeNumber(raw.weeklyPlaytime, 0))),
   };
 }
 
-function configureAvatarImage(image, player, size = 64) {
-  if (!image || !player) {
+function configureAvatarImage(image, cacheMap, cacheKey, sourceId, fallbackName, size = 64) {
+  if (!image || !cacheMap || !cacheKey) {
     return;
   }
 
-  const cache = state.playerAvatarCache.get(player.key) || {};
-  const primarySource = player.uuid || player.name;
-  const primary = `https://mc-heads.net/avatar/${encodeURIComponent(primarySource)}/${size}`;
-  const fallback = `https://minotar.net/avatar/${encodeURIComponent(player.name)}/${size}`;
+  const primary = sourceId
+    ? `https://mc-heads.net/avatar/${encodeURIComponent(sourceId)}/${size}`
+    : '';
+  const fallback = fallbackName
+    ? `https://minotar.net/avatar/${encodeURIComponent(fallbackName)}/${size}`
+    : '';
+  const cached = cacheMap.get(cacheKey) || '';
+  const next = cached || primary || fallback;
 
-  image.alt = `${player.name} avatar`;
-  image.dataset.avatarKey = player.key;
+  if (!next) {
+    return;
+  }
+
   image.classList.remove('loaded');
-
-  if (cache.current && image.src === cache.current) {
-    if (image.complete && image.naturalWidth > 0) {
-      image.classList.add('loaded');
-    }
-    return;
+  if (image.src !== next) {
+    image.src = next;
   }
 
-  const nextUrl = cache.current || primary;
-  if (image.src !== nextUrl) {
-    image.src = nextUrl;
-  }
+  image.onload = () => {
+    cacheMap.set(cacheKey, image.src || next);
+    image.classList.add('loaded');
+  };
 
   image.onerror = () => {
-    if (image.src !== fallback) {
+    if (fallback && image.src !== fallback) {
+      cacheMap.set(cacheKey, fallback);
       image.src = fallback;
-      state.playerAvatarCache.set(player.key, { current: fallback });
       return;
     }
 
@@ -359,361 +388,314 @@ function configureAvatarImage(image, player, size = 64) {
     image.classList.add('loaded');
   };
 
-  image.onload = () => {
-    state.playerAvatarCache.set(player.key, { current: image.src || primary });
+  if (image.complete && image.naturalWidth > 0) {
+    cacheMap.set(cacheKey, image.src || next);
     image.classList.add('loaded');
-  };
+  }
 }
 
-function createPlayerNode(player) {
-  const item = document.createElement('div');
-  item.className = 'player-item player-item--entering';
-  item.dataset.playerKey = player.key;
-  item.tabIndex = 0;
+function createPlayerCard(player) {
+  const card = document.createElement('article');
+  card.className = 'player-card';
+  card.dataset.playerKey = player.key;
 
-  const left = document.createElement('div');
-  left.className = 'player-item__left';
-
-  const avatarShell = document.createElement('div');
-  avatarShell.className = 'player-avatar-shell';
+  const top = document.createElement('div');
+  top.className = 'player-card__top';
 
   const avatar = document.createElement('img');
   avatar.className = 'player-avatar';
-  avatar.width = 40;
-  avatar.height = 40;
+  avatar.width = 44;
+  avatar.height = 44;
+  avatar.alt = `${player.name} avatar`;
   avatar.loading = 'lazy';
   avatar.decoding = 'async';
-  avatar.referrerPolicy = 'no-referrer';
-  configureAvatarImage(avatar, player, 64);
+
+  const identity = document.createElement('div');
+  identity.className = 'player-identity';
+
+  const name = document.createElement('div');
+  name.className = 'player-name';
+
+  const statusLine = document.createElement('div');
+  statusLine.className = 'player-status-line';
 
   const dot = document.createElement('span');
   dot.className = 'player-status-dot';
+  dot.setAttribute('aria-hidden', 'true');
 
-  avatarShell.appendChild(avatar);
-  avatarShell.appendChild(dot);
+  const statusText = document.createElement('span');
+  statusText.className = 'player-status-text';
 
-  const info = document.createElement('div');
-  info.className = 'player-info';
+  statusLine.appendChild(dot);
+  statusLine.appendChild(statusText);
+  identity.appendChild(name);
+  identity.appendChild(statusLine);
+  top.appendChild(avatar);
+  top.appendChild(identity);
 
-  const name = document.createElement('span');
-  name.className = 'player-name';
-  name.textContent = player.name;
-
-  const meta = document.createElement('span');
-  meta.className = 'player-status';
-
-  const session = document.createElement('span');
-  session.className = 'player-session';
-
-  info.appendChild(name);
-  info.appendChild(meta);
-  info.appendChild(session);
-
-  left.appendChild(avatarShell);
-  left.appendChild(info);
-
-  const right = document.createElement('div');
-  right.className = 'player-item__right';
+  const rowOne = document.createElement('div');
+  rowOne.className = 'player-meta-row';
 
   const ping = document.createElement('span');
-  ping.className = 'player-ping-badge';
-  right.appendChild(ping);
+  ping.className = 'meta-pill';
 
-  item.appendChild(left);
-  item.appendChild(right);
+  const session = document.createElement('span');
+  session.className = 'meta-pill';
 
-  item.addEventListener('mouseenter', () => setHoveredPlayer(player.key));
-  item.addEventListener('focus', () => setHoveredPlayer(player.key));
-  item.addEventListener('click', () => setHoveredPlayer(player.key));
+  rowOne.appendChild(ping);
+  rowOne.appendChild(session);
 
-  updatePlayerNode(item, player);
-  window.setTimeout(() => item.classList.remove('player-item--entering'), 180);
-  return item;
+  const rowTwo = document.createElement('div');
+  rowTwo.className = 'player-meta-row';
+
+  const total = document.createElement('span');
+  total.className = 'meta-pill';
+
+  const daily = document.createElement('span');
+  daily.className = 'meta-pill';
+
+  const weekly = document.createElement('span');
+  weekly.className = 'meta-pill';
+
+  rowTwo.appendChild(total);
+  rowTwo.appendChild(daily);
+  rowTwo.appendChild(weekly);
+
+  card.appendChild(top);
+  card.appendChild(rowOne);
+  card.appendChild(rowTwo);
+
+  updatePlayerCard(card, player);
+  return card;
 }
 
-function updatePlayerNode(node, player) {
-  if (!node) {
-    return;
+function updatePlayerCard(card, player) {
+  const avatar = card.querySelector('.player-avatar');
+  const name = card.querySelector('.player-name');
+  const dot = card.querySelector('.player-status-dot');
+  const statusText = card.querySelector('.player-status-text');
+  const pills = card.querySelectorAll('.meta-pill');
+
+  if (name) {
+    name.textContent = player.name;
   }
 
-  node.dataset.playerKey = player.key;
-  node.classList.toggle('is-active', state.selectedPlayerKey === player.key);
-
-  const statusNode = node.querySelector('.player-status');
-  const sessionNode = node.querySelector('.player-session');
-  const pingNode = node.querySelector('.player-ping-badge');
-  const dotNode = node.querySelector('.player-status-dot');
-  const avatarNode = node.querySelector('.player-avatar');
-  const nameNode = node.querySelector('.player-name');
-
-  if (nameNode && nameNode.textContent !== player.name) {
-    nameNode.textContent = player.name;
+  const statusState = player.status === 'offline' ? 'offline' : player.isAFK ? 'afk' : 'online';
+  if (dot) {
+    dot.dataset.state = statusState;
   }
 
-  if (statusNode) {
-    const statusText = player.status === 'offline' ? 'Offline' : player.isAFK ? 'AFK' : 'Online';
-    statusNode.textContent = statusText;
-    statusNode.dataset.state = player.status;
+  if (statusText) {
+    statusText.textContent = statusState === 'online'
+      ? 'Online'
+      : statusState === 'afk'
+        ? 'AFK'
+        : 'Offline';
   }
 
-  if (sessionNode) {
-    sessionNode.textContent = `Session: ${formatUptime(player.sessionTime)}`;
-  }
+  if (pills[0]) pills[0].textContent = `Ping: ${player.ping > 0 ? `${Math.round(player.ping)} ms` : '--'}`;
+  if (pills[1]) pills[1].textContent = `Session: ${formatUptime(player.sessionTime)}`;
+  if (pills[2]) pills[2].textContent = `Total: ${formatUptime(player.totalPlaytime)}`;
+  if (pills[3]) pills[3].textContent = `Daily: ${formatUptime(player.dailyPlaytime)}`;
+  if (pills[4]) pills[4].textContent = `Weekly: ${formatUptime(player.weeklyPlaytime)}`;
 
-  if (pingNode) {
-    pingNode.textContent = player.ping > 0 ? `Ping: ${Math.round(player.ping)} ms` : 'Ping: --';
-  }
-
-  if (dotNode) {
-    dotNode.dataset.state = player.status === 'offline' ? 'offline' : player.isAFK ? 'afk' : 'online';
-  }
-
-  if (avatarNode) {
-    configureAvatarImage(avatarNode, player, 64);
-  }
-}
-
-function renderEmptyPlayerState() {
-  if (!elements.playerList) {
-    return;
-  }
-
-  const empty = document.createElement('div');
-  empty.className = 'empty-state empty-state--players';
-  empty.textContent = 'No players online';
-  elements.playerList.replaceChildren(empty);
-  state.playerNodeMap.clear();
-  state.selectedPlayerKey = '';
-  renderHoverCard(null);
-}
-
-function setHoveredPlayer(playerKey) {
-  state.selectedPlayerKey = playerKey;
-  const player = state.players.find((entry) => entry.key === playerKey) || null;
-  renderHoverCard(player);
-  state.playerNodeMap.forEach((node, key) => {
-    node.classList.toggle('is-active', key === playerKey);
-  });
-}
-
-function renderHoverCard(player) {
-  if (!elements.playerHoverCard || !elements.playerHoverPlaceholder || !elements.playerHoverContent) {
-    return;
-  }
-
-  if (!player) {
-    elements.playerHoverCard.classList.remove('is-active');
-    elements.playerHoverPlaceholder.hidden = false;
-    elements.playerHoverPlaceholder.textContent = state.players.length
-      ? 'Hover a player to see live details'
-      : 'No players online';
-    elements.playerHoverContent.hidden = true;
-    return;
-  }
-
-  elements.playerHoverCard.classList.add('is-active');
-  elements.playerHoverPlaceholder.hidden = true;
-  elements.playerHoverContent.hidden = false;
-
-  if (elements.playerHoverAvatar) {
-    configureAvatarImage(elements.playerHoverAvatar, player, 96);
-  }
-
-  if (elements.playerHoverName) {
-    elements.playerHoverName.textContent = player.name;
-  }
-
-  if (elements.playerHoverStatus) {
-    elements.playerHoverStatus.textContent = player.status === 'offline' ? 'Offline' : player.isAFK ? 'AFK' : 'Online';
-  }
-
-  if (elements.playerHoverPing) {
-    elements.playerHoverPing.textContent = player.ping > 0 ? `${Math.round(player.ping)} ms` : '--';
-  }
-
-  if (elements.playerHoverSession) {
-    elements.playerHoverSession.textContent = formatUptime(player.sessionTime);
-  }
-
-  if (elements.playerHoverTotal) {
-    elements.playerHoverTotal.textContent = formatUptime(player.totalPlaytime);
-  }
-
-  if (elements.playerHoverDaily) {
-    elements.playerHoverDaily.textContent = formatUptime(player.dailyPlaytime);
-  }
-
-  if (elements.playerHoverWeekly) {
-    elements.playerHoverWeekly.textContent = formatUptime(player.weeklyPlaytime);
+  if (avatar) {
+    configureAvatarImage(
+      avatar,
+      state.playerAvatarCache,
+      `player:${player.key}`,
+      player.uuid || player.name,
+      player.name,
+      64
+    );
   }
 }
 
-function syncPlayerList(players) {
+function renderPlayers(players) {
   if (!elements.playerList) {
     return;
   }
 
   if (!players.length) {
-    renderEmptyPlayerState();
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'No players online';
+    elements.playerList.replaceChildren(empty);
+    state.playerNodeMap.clear();
     return;
   }
 
+  const existing = state.playerNodeMap;
   const nextKeys = new Set(players.map((player) => player.key));
-  state.playerNodeMap.forEach((node, key) => {
+
+  existing.forEach((node, key) => {
     if (!nextKeys.has(key)) {
-      node.classList.add('player-item--leaving');
-      window.setTimeout(() => node.remove(), 180);
-      state.playerNodeMap.delete(key);
-      state.playerStatsMap.delete(key);
+      node.remove();
+      existing.delete(key);
     }
   });
 
+  const fragment = document.createDocumentFragment();
   players.forEach((player) => {
-    let node = state.playerNodeMap.get(player.key);
-
+    let node = existing.get(player.key);
     if (!node) {
-      node = createPlayerNode(player);
-      state.playerNodeMap.set(player.key, node);
+      node = createPlayerCard(player);
+      existing.set(player.key, node);
     } else {
-      updatePlayerNode(node, player);
+      updatePlayerCard(node, player);
     }
-
-    elements.playerList.appendChild(node);
+    fragment.appendChild(node);
   });
 
-  if (!state.selectedPlayerKey || !players.some((player) => player.key === state.selectedPlayerKey)) {
-    state.selectedPlayerKey = players[0].key;
+  elements.playerList.replaceChildren(fragment);
+}
+
+function normalizeLeaderboardEntry(entry) {
+  if (!entry || typeof entry !== 'object') {
+    return null;
   }
 
-  setHoveredPlayer(state.selectedPlayerKey);
+  const username = String(entry.username || entry.name || entry.player || '').trim();
+  const uuid = String(entry.uuid || entry.id || '').trim();
+  const key = uuid || username.toLowerCase();
+  const value = Number(entry.value || entry.score || entry.amount || entry.balance || 0);
+
+  if (!username || !key || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return { key, uuid, username, value };
 }
 
-function schedulePlayerRender(players) {
-  state.pendingPlayerRender = players;
-  const elapsed = Date.now() - state.playerRenderAt;
-  const wait = elapsed >= PLAYER_RENDER_THROTTLE_MS ? 0 : PLAYER_RENDER_THROTTLE_MS - elapsed;
-
-  window.setTimeout(() => {
-    if (!state.pendingPlayerRender) {
-      return;
-    }
-
-    const nextPlayers = state.pendingPlayerRender;
-    state.pendingPlayerRender = null;
-    state.playerRenderAt = Date.now();
-    syncPlayerList(nextPlayers);
-  }, wait);
+function buildLeaderboardSignature(items) {
+  return items.map((item) => `${item.key}:${item.value}`).join('|');
 }
 
-async function refreshPlayerStats(players) {
-  if (!players.length) {
+function renderLeaderboardCategory(name, items, loading = false) {
+  const list = elements.leaderboardLists[name];
+  if (!list) {
     return;
   }
 
-  await Promise.all(
-    players.map(async (player) => {
-      try {
-        const response = await fetch(`/api/player/${encodeURIComponent(player.key)}/stats`, {
-          method: 'GET',
-          cache: 'no-store',
-          headers: { Accept: 'application/json' },
-        });
-
-        if (!response.ok) {
-          return;
-        }
-
-        const payload = await response.json();
-        if (!payload || payload.success === false) {
-          return;
-        }
-
-        const stats = {
-          sessionTime: Math.max(0, Math.floor(normalizeNumber(payload.sessionTime, player.sessionTime))),
-          totalPlaytime: Math.max(0, Math.floor(normalizeNumber(payload.total, player.totalPlaytime))),
-          dailyPlaytime: Math.max(0, Math.floor(normalizeNumber(payload.daily, player.dailyPlaytime))),
-          weeklyPlaytime: Math.max(0, Math.floor(normalizeNumber(payload.weekly, player.weeklyPlaytime))),
-          isAFK: Boolean(payload.isAFK),
-          isOnline: Boolean(payload.isOnline),
-          fetchedAt: Date.now(),
-        };
-
-        state.playerStatsMap.set(player.key, stats);
-      } catch (error) {
-        // Keep previous stats on network errors.
-      }
-    })
-  );
-
-  state.players = state.players.map((player) => {
-    const extra = state.playerStatsMap.get(player.key);
-    return extra
-      ? {
-          ...player,
-          sessionTime: extra.sessionTime,
-          totalPlaytime: extra.totalPlaytime,
-          dailyPlaytime: extra.dailyPlaytime,
-          weeklyPlaytime: extra.weeklyPlaytime,
-          isAFK: extra.isAFK,
-        }
-      : player;
-  });
-
-  schedulePlayerRender(state.players);
-}
-
-function tickPlayerCounters() {
-  if (!state.players.length) {
+  if (loading && !items.length) {
+    list.innerHTML = '<div class="mini-empty">Loading...</div>';
     return;
   }
 
-  let changed = false;
+  if (!items.length) {
+    list.innerHTML = '<div class="mini-empty">No ranking data yet</div>';
+    return;
+  }
 
-  state.players = state.players.map((player) => {
-    const stats = state.playerStatsMap.get(player.key);
-    if (!stats || !stats.isOnline || stats.isAFK) {
-      return player;
-    }
+  const signature = buildLeaderboardSignature(items);
+  if (signature === state.leaderboards[name].signature) {
+    return;
+  }
 
-    changed = true;
-    stats.sessionTime += 1;
-    stats.totalPlaytime += 1;
-    stats.dailyPlaytime += 1;
-    stats.weeklyPlaytime += 1;
+  state.leaderboards[name].signature = signature;
 
-    return {
-      ...player,
-      sessionTime: stats.sessionTime,
-      totalPlaytime: stats.totalPlaytime,
-      dailyPlaytime: stats.dailyPlaytime,
-      weeklyPlaytime: stats.weeklyPlaytime,
-    };
+  const fragment = document.createDocumentFragment();
+  items.slice(0, 5).forEach((entry, index) => {
+    const row = document.createElement('div');
+    row.className = 'leaderboard-mini-row';
+
+    const rank = document.createElement('span');
+    rank.className = 'mini-rank';
+    rank.textContent = `#${index + 1}`;
+
+    const avatar = document.createElement('img');
+    avatar.className = 'mini-avatar';
+    avatar.width = 30;
+    avatar.height = 30;
+    avatar.alt = `${entry.username} avatar`;
+    avatar.loading = 'lazy';
+    avatar.decoding = 'async';
+
+    const nameNode = document.createElement('span');
+    nameNode.className = 'mini-name';
+    nameNode.textContent = entry.username;
+
+    const value = document.createElement('span');
+    value.className = 'mini-value';
+    value.textContent = formatNumber(entry.value);
+
+    configureAvatarImage(
+      avatar,
+      state.leaderboardAvatarCache,
+      `leaderboard:${name}:${entry.key}`,
+      entry.uuid || entry.username,
+      entry.username,
+      48
+    );
+
+    row.appendChild(rank);
+    row.appendChild(avatar);
+    row.appendChild(nameNode);
+    row.appendChild(value);
+
+    fragment.appendChild(row);
   });
 
-  if (changed) {
-    schedulePlayerRender(state.players);
+  list.replaceChildren(fragment);
+}
+
+async function fetchCategory(name, endpoint) {
+  try {
+    const response = await fetch(endpoint, {
+      method: 'GET',
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const rows = (Array.isArray(payload) ? payload : payload?.items || payload?.data || payload?.entries || [])
+      .map(normalizeLeaderboardEntry)
+      .filter(Boolean)
+      .sort((a, b) => b.value - a.value);
+
+    renderLeaderboardCategory(name, rows);
+  } catch (error) {
+    renderLeaderboardCategory(name, [], false);
   }
+}
+
+async function fetchLeaderboards() {
+  renderLeaderboardCategory('kills', [], true);
+  renderLeaderboardCategory('balance', [], true);
+  renderLeaderboardCategory('bounty', [], true);
+  renderLeaderboardCategory('earnings', [], true);
+
+  await Promise.all([
+    fetchCategory('kills', '/api/leaderboard/kills'),
+    fetchCategory('balance', '/api/leaderboard/balance'),
+    fetchCategory('bounty', '/api/leaderboard/bounty'),
+    fetchCategory('earnings', '/api/leaderboard/earnings'),
+  ]);
 }
 
 function renderLoading() {
   state.hasData = false;
   setConnectionState('loading', 'Connecting');
-  if (elements.apiMessage) {
-    elements.apiMessage.textContent = 'Waiting for the first server payload...';
-  }
+  setChartOpacity(false);
 
   if (elements.uptimeValue) elements.uptimeValue.textContent = '--';
   if (elements.serverIpValue) elements.serverIpValue.textContent = '--';
   if (elements.cpuValue) elements.cpuValue.textContent = '--';
   if (elements.ramValue) elements.ramValue.textContent = '--';
   if (elements.playersValue) elements.playersValue.textContent = '--';
+  if (elements.playersCountMirror) elements.playersCountMirror.textContent = '--';
   if (elements.serverValue) {
     elements.serverValue.textContent = '--';
     elements.serverValue.dataset.state = 'loading';
   }
   if (elements.timeValue) elements.timeValue.textContent = '--';
-  setChartOpacity(false);
-  renderEmptyPlayerState();
+  if (elements.apiMessage) elements.apiMessage.textContent = 'Waiting for the first server payload...';
+
+  renderPlayers([]);
 }
 
 function markOffline() {
@@ -726,59 +708,48 @@ function markOffline() {
   }
 
   if (elements.apiMessage) {
-    const text = state.lastFreshAt > 0
-      ? `No recent data received. Last update ${formatSecondsAgo(state.lastFreshAt)}.`
-      : 'No recent data received';
-    elements.apiMessage.textContent = text;
+    const age = state.lastFreshAt > 0 ? formatElapsed(Date.now() - state.lastFreshAt) : 'unknown';
+    elements.apiMessage.textContent = `No recent data received (${age}).`;
   }
 }
 
 function renderSnapshot(snapshot) {
+  const players = Math.max(0, Math.floor(normalizeNumber(snapshot.players, 0)));
   const cpu = Math.max(0, normalizeNumber(snapshot.cpu, 0));
   const ramUsed = Math.max(0, normalizeNumber(snapshot.ramUsed, normalizeNumber(snapshot.ram, 0) / 1024));
   const ramMax = Math.max(0, normalizeNumber(snapshot.ramMax, 0));
-  const players = Math.max(0, Math.floor(normalizeNumber(snapshot.players, 0)));
-  const status = String(snapshot.status || 'offline').toLowerCase() === 'online' ? 'online' : 'offline';
+  const status = String(snapshot.status || 'offline').toLowerCase() === 'online' ? 'Online' : 'Offline';
 
   if (elements.uptimeValue) elements.uptimeValue.textContent = formatUptime(snapshot.uptime);
   if (elements.serverIpValue) elements.serverIpValue.textContent = normalizeString(snapshot.ip, 'dxir.live');
   if (elements.cpuValue) elements.cpuValue.textContent = `${cpu.toFixed(cpu % 1 === 0 ? 0 : 1)}%`;
   if (elements.ramValue) elements.ramValue.textContent = `${ramUsed.toFixed(2)} / ${ramMax.toFixed(2)} GB`;
   if (elements.playersValue) elements.playersValue.textContent = String(players);
+  if (elements.playersCountMirror) elements.playersCountMirror.textContent = String(players);
+
   if (elements.serverValue) {
-    elements.serverValue.textContent = status === 'online' ? 'Online' : 'Offline';
-    elements.serverValue.dataset.state = status;
+    elements.serverValue.textContent = status;
+    elements.serverValue.dataset.state = status.toLowerCase();
   }
-  if (elements.timeValue) elements.timeValue.textContent = snapshot.time || '--';
 
-  setConnectionState(status, status === 'online' ? 'Online' : 'Offline');
-  setChartOpacity(status !== 'online');
-
+  if (elements.timeValue) elements.timeValue.textContent = normalizeString(snapshot.time, '--');
   if (elements.apiMessage) {
-    elements.apiMessage.textContent = `Live data received. Last update ${formatSecondsAgo(snapshot.lastUpdate)}.`;
+    elements.apiMessage.textContent = `Live data received ${formatElapsed(Date.now() - Number(snapshot.lastUpdate || Date.now()))}.`;
   }
 
-  const playersFromApi = Array.isArray(snapshot.playerList) ? snapshot.playerList.map(normalizePlayer).filter(Boolean) : [];
-  state.players = playersFromApi;
+  setConnectionState(status.toLowerCase(), status);
+  setChartOpacity(status !== 'Online');
 
-  state.players.forEach((player) => {
-    state.playerStatsMap.set(player.key, {
-      sessionTime: player.sessionTime,
-      totalPlaytime: player.totalPlaytime,
-      dailyPlaytime: player.dailyPlaytime,
-      weeklyPlaytime: player.weeklyPlaytime,
-      isAFK: player.isAFK,
-      isOnline: player.status === 'online',
-      fetchedAt: Date.now(),
-    });
-  });
+  state.players = Array.isArray(snapshot.playerList)
+    ? snapshot.playerList.map(normalizePlayer).filter(Boolean)
+    : [];
 
-  schedulePlayerRender(state.players);
+  renderPlayers(state.players);
 }
 
 function renderData(payload) {
   const { latest, history } = unwrapApiPayload(payload);
-  const snapshot = latest && typeof latest === 'object' ? latest : null;
+  const snapshot = latest || (history.length ? history[history.length - 1] : null);
 
   if (!snapshot || !Number.isFinite(Number(snapshot.lastUpdate)) || Number(snapshot.lastUpdate) <= 0) {
     if (!state.hasData) {
@@ -789,9 +760,8 @@ function renderData(payload) {
     return;
   }
 
-  const snapshotUpdate = Number(snapshot.lastUpdate);
-
-  if (snapshotUpdate === state.lastSeenUpdate) {
+  const lastUpdate = Number(snapshot.lastUpdate);
+  if (lastUpdate === state.lastSeenUpdate) {
     if (Date.now() - state.lastFreshAt > OFFLINE_THRESHOLD_MS) {
       markOffline();
     }
@@ -799,11 +769,11 @@ function renderData(payload) {
   }
 
   state.hasData = true;
-  state.lastSeenUpdate = snapshotUpdate;
+  state.lastSeenUpdate = lastUpdate;
   state.lastFreshAt = Date.now();
 
   renderSnapshot(snapshot);
-  applyHistoryToChart(Array.isArray(history) && history.length ? history : [snapshot]);
+  applyHistoryToChart(history.length ? history : [snapshot]);
 }
 
 async function fetchStats() {
@@ -825,7 +795,7 @@ async function fetchStats() {
       renderLoading();
       setConnectionState('error', 'API error');
       if (elements.apiMessage) {
-        elements.apiMessage.textContent = 'Unable to reach the API yet. Retrying automatically...';
+        elements.apiMessage.textContent = 'Unable to reach the API. Retrying automatically...';
       }
       return;
     }
@@ -838,9 +808,9 @@ async function fetchStats() {
 
 function startPolling() {
   fetchStats();
+  fetchLeaderboards();
   state.pollTimer = window.setInterval(fetchStats, POLL_INTERVAL_MS);
-  state.playtimeFetchTimer = window.setInterval(() => refreshPlayerStats(state.players), PLAYTIME_REFRESH_MS);
-  state.playtimeTickTimer = window.setInterval(tickPlayerCounters, PLAYTIME_TICK_MS);
+  state.leaderboardTimer = window.setInterval(fetchLeaderboards, LEADERBOARD_INTERVAL_MS);
 }
 
 function bindEvents() {
@@ -849,17 +819,6 @@ function bindEvents() {
       applyTheme(state.theme === 'light' ? 'dark' : 'light');
     });
   }
-
-  document.addEventListener('click', (event) => {
-    const target = event.target;
-    if (elements.playerList?.contains(target) || elements.playerHoverCard?.contains(target)) {
-      return;
-    }
-
-    state.selectedPlayerKey = '';
-    renderHoverCard(null);
-    state.playerNodeMap.forEach((node) => node.classList.remove('is-active'));
-  });
 }
 
 document.addEventListener('DOMContentLoaded', () => {

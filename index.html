@@ -27,127 +27,104 @@
     </script>
     <main class="app-shell">
       <section class="header-card card">
-        <div class="brand-block">
-          <div class="brand-mark" aria-hidden="true">
-            <span></span>
-                <div class="player-panel__list">
-                  <div class="player-list" id="playerList" aria-live="polite"></div>
+          <section class="dashboard-grid" aria-label="Server statistics">
+            <article class="card dashboard-card stats-card" aria-label="Server overview">
+              <div class="card-head">
+                <div>
+                  <p class="stat-kicker">Server Stats</p>
+                  <h2 class="stat-title">Live Overview</h2>
                 </div>
-
-                <div class="player-panel__detail">
-                  <aside class="player-hover-card" id="playerHoverCard" aria-live="polite">
-                    <div class="player-hover-card__placeholder" id="playerHoverPlaceholder">
-                      Hover a player to see live details
-                    </div>
-
-                    <div class="player-hover-card__content" id="playerHoverContent" hidden>
-                      <div class="player-hover-card__top">
-                        <div class="player-hover-avatar-shell">
-                          <img
-                            class="player-hover-avatar"
-                            id="playerHoverAvatar"
-                            alt=""
-                            loading="lazy"
-                            decoding="async"
-                          />
-                          <span class="player-status-dot player-status-dot--lg" aria-hidden="true"></span>
-                        </div>
-
-                        <div class="player-hover-identity">
-                          <div class="player-hover-name" id="playerHoverName">—</div>
-                          <div class="player-hover-status" id="playerHoverStatus">Online</div>
-                        </div>
-
-
-                      <div class="player-hover-meta-grid">
-                        <div class="player-hover-meta-block">
-                          <span>Ping</span>
-                          <strong id="playerHoverPing">—</strong>
-                        </div>
-
-                        <div class="player-hover-meta-block">
-                          <span>Session</span>
-                          <strong id="playerHoverSession">—</strong>
-                        </div>
-
-                        <div class="player-hover-meta-block">
-                          <span>Total</span>
-                          <strong id="playerHoverTotal">—</strong>
-                        </div>
-
-                        <div class="player-hover-meta-block">
-                          <span>Daily</span>
-                          <strong id="playerHoverDaily">—</strong>
-                        </div>
-
-                        <div class="player-hover-meta-block">
-                          <span>Weekly</span>
-                          <strong id="playerHoverWeekly">—</strong>
-                        </div>
-                      </div>
-        <article class="card stat-card">
-                  </aside>
-                </div>
-              <p class="stat-kicker">RAM</p>
-              <h2 class="stat-title">Java process memory</h2>
-            </div>
-          </div>
-          <div class="stat-main" id="ramValue">--</div>
-          <div class="stat-meta">Minecraft server memory usage</div>
-        </article>
-
-        <article class="card stat-card stat-card--players">
-          <div class="stat-card__head">
-            <div>
-              <p class="stat-kicker">Players</p>
-              <h2 class="stat-title">Online now</h2>
-            </div>
-            <div class="stat-count" id="playersValue">--</div>
-          </div>
-
-          <div class="player-panel">
-            <div class="player-list" id="playerList" aria-live="polite"></div>
-
-            <aside class="player-hover-card" id="playerHoverCard" aria-live="polite">
-              <div class="player-hover-card__placeholder" id="playerHoverPlaceholder">
-                Hover a player to see live details
+                <span class="status-badge" id="serverValue">--</span>
               </div>
 
-              <div class="player-hover-card__content" id="playerHoverContent" hidden>
-                <div class="player-hover-card__top">
-                  <div class="player-hover-avatar-shell">
-                    <img
-                      class="player-hover-avatar"
-                      id="playerHoverAvatar"
-                      alt=""
-                      loading="lazy"
-                      decoding="async"
-                    />
-                    <span class="player-status-dot player-status-dot--lg" aria-hidden="true"></span>
-                  </div>
+              <div class="metric-block">
+                <div class="metric-label">Uptime</div>
+                <div class="metric-value" id="uptimeValue">--</div>
+              </div>
 
-                  <div class="player-hover-identity">
-                    <div class="player-hover-name" id="playerHoverName">—</div>
-                    <div class="player-hover-status" id="playerHoverStatus">Online</div>
-                  </div>
+              <div class="stats-inline-grid">
+                <div class="info-chip">
+                  <span>CPU</span>
+                  <strong id="cpuValue">--</strong>
                 </div>
+                <div class="info-chip">
+                  <span>RAM</span>
+                  <strong id="ramValue">--</strong>
+                </div>
+                <div class="info-chip">
+                  <span>Players</span>
+                  <strong id="playersValue">--</strong>
+                </div>
+                <div class="info-chip">
+                  <span>IP</span>
+                  <strong id="serverIpValue">--</strong>
+                </div>
+              </div>
 
-                <div class="player-hover-meta-grid">
-                  <div class="player-hover-meta-block">
-                    <span>Ping</span>
-                    <strong id="playerHoverPing">—</strong>
-                  </div>
+              <p class="status-line" id="apiMessage">Waiting for the first server update...</p>
+              <p class="status-line">Last updated: <span id="timeValue">--</span></p>
+            </article>
 
-                  <div class="player-hover-meta-block">
-                    <span>Session</span>
-                    <strong id="playerHoverSession">—</strong>
-                  </div>
+            <article class="card dashboard-card players-card" aria-label="Players panel">
+              <div class="card-head">
+                <div>
+                  <p class="stat-kicker">Players</p>
+                  <h2 class="stat-title">Online Now</h2>
+                </div>
+                <span class="stat-count" id="playersCountMirror">0</span>
+              </div>
 
-                  <div class="player-hover-meta-block">
-                    <span>Total</span>
-                    <strong id="playerHoverTotal">—</strong>
-                  </div>
+              <div class="player-list" id="playerList" aria-live="polite"></div>
+            </article>
 
+            <article class="card dashboard-card chart-card" aria-label="CPU chart">
+              <div class="card-head">
+                <div>
+                  <p class="stat-kicker">Live Chart</p>
+                  <h2 class="stat-title">CPU and RAM Trends</h2>
+                </div>
+                <span class="chart-note">Updated every 2 seconds</span>
+              </div>
+
+              <div class="chart-wrap">
+                <canvas id="usageChart" aria-label="CPU and RAM usage chart" role="img"></canvas>
+              </div>
+            </article>
+          </section>
+
+          <section class="dashboard-leaderboards" aria-label="Leaderboard preview">
+            <article class="card leaderboard-mini-card">
+              <div class="card-head compact-head">
+                <h3>Top Kills</h3>
+                <a href="/leaderboard">View all</a>
+              </div>
+              <div class="leaderboard-mini-list" id="killsLeaderboardList"></div>
+            </article>
+
+            <article class="card leaderboard-mini-card">
+              <div class="card-head compact-head">
+                <h3>Richest Players</h3>
+                <a href="/leaderboard">View all</a>
+              </div>
+              <div class="leaderboard-mini-list" id="balanceLeaderboardList"></div>
+            </article>
+
+            <article class="card leaderboard-mini-card">
+              <div class="card-head compact-head">
+                <h3>Highest Bounty</h3>
+                <a href="/leaderboard">View all</a>
+              </div>
+              <div class="leaderboard-mini-list" id="bountyLeaderboardList"></div>
+            </article>
+
+            <article class="card leaderboard-mini-card">
+              <div class="card-head compact-head">
+                <h3>Top Earners</h3>
+                <a href="/leaderboard">View all</a>
+              </div>
+              <div class="leaderboard-mini-list" id="earningsLeaderboardList"></div>
+            </article>
+          </section>
                   <div class="player-hover-meta-block">
                     <span>Daily</span>
                     <strong id="playerHoverDaily">—</strong>
