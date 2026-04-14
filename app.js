@@ -149,7 +149,7 @@ function getCssVar(name) {
 
 function getChartPalette() {
   return {
-    cpu: getCssVar('--chart-cpu') || '#6C5CE7',
+    cpu: getCssVar('--chart-cpu') || '#7C3AED',
     ram: getCssVar('--chart-ram') || '#8B5CF6',
     grid: getCssVar('--chart-grid') || 'rgba(148, 163, 184, 0.14)',
     ticks: getCssVar('--chart-ticks') || '#9CA3AF',
@@ -270,8 +270,8 @@ function initChart() {
           backgroundColor: palette.tooltipBg,
           borderColor: palette.tooltipBorder,
           borderWidth: 1,
-          titleColor: getCssVar('--text-color') || '#E5E7EB',
-          bodyColor: getCssVar('--text-color') || '#E5E7EB',
+          titleColor: getCssVar('--text-primary') || '#E5E7EB',
+          bodyColor: getCssVar('--text-primary') || '#E5E7EB',
           padding: 12,
           displayColors: true,
         },
@@ -477,5 +477,6 @@ document.addEventListener('DOMContentLoaded', () => {
   renderLoading();
   startPolling();
 });
+
 
 

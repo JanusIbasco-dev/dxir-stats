@@ -1,53 +1,55 @@
 :root {
   color-scheme: dark;
-  --bg-color: #0f172a;
-  --card-color: #1f2937;
-  --text-color: #e5e7eb;
-  --accent-color: #6c5ce7;
-  --secondary-color: #a29bfe;
-  --muted-color: #9ca3af;
-  --border-color: rgba(162, 155, 254, 0.16);
-  --border-strong: rgba(162, 155, 254, 0.26);
+  --primary: #7C3AED;
+  --primary-light: #A78BFA;
+  --accent: #8B5CF6;
+  --bg-dark: #0F172A;
+  --bg-card: #1E293B;
+  --text-primary: #E5E7EB;
+  --text-secondary: #94A3B8;
+  --border: #334155;
   --shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
   --radius: 16px;
   --gap: 16px;
   --success: #22c55e;
   --danger: #ef4444;
-  --chart-cpu: #6c5ce7;
-  --chart-ram: #8b5cf6;
+  --chart-cpu: #7C3AED;
+  --chart-ram: #8B5CF6;
   --chart-grid: rgba(148, 163, 184, 0.14);
-  --chart-ticks: #9ca3af;
+  --chart-ticks: #94A3B8;
   --chart-tooltip-bg: #111827;
   --chart-tooltip-border: rgba(148, 163, 184, 0.2);
   --chart-card-bg: rgba(255, 255, 255, 0.02);
-  --bg: var(--bg-color);
+  --bg: var(--bg-dark);
   --bg-2: #111827;
-  --card: var(--card-color);
-  --card-2: rgba(31, 41, 55, 0.92);
-  --border: var(--border-color);
-  --text: var(--text-color);
-  --muted: var(--muted-color);
-  --primary: var(--accent-color);
-  --secondary: var(--secondary-color);
-  --accent: #8b5cf6;
+  --card: var(--bg-card);
+  --card-2: rgba(30, 41, 59, 0.92);
+  --border-color: var(--border);
+  --border-strong: rgba(167, 139, 250, 0.24);
+  --text: var(--text-primary);
+  --muted: var(--text-secondary);
+  --secondary: var(--primary-light);
 }
 
 body.light {
   color-scheme: light;
-  --bg-color: #f9fafb;
-  --card-color: #ffffff;
-  --text-color: #111827;
-  --accent-color: #6c5ce7;
-  --secondary-color: #8b5cf6;
-  --muted-color: #4b5563;
-  --border-color: rgba(107, 114, 128, 0.14);
-  --border-strong: rgba(108, 92, 231, 0.22);
+  --bg-dark: #F9FAFB;
+  --bg-card: #FFFFFF;
+  --text-primary: #111827;
+  --text-secondary: #6B7280;
+  --border: #E5E7EB;
   --shadow: 0 18px 40px rgba(15, 23, 42, 0.10);
   --chart-grid: rgba(107, 114, 128, 0.12);
   --chart-ticks: #4b5563;
   --chart-tooltip-bg: #ffffff;
   --chart-tooltip-border: rgba(107, 114, 128, 0.18);
   --chart-card-bg: rgba(15, 23, 42, 0.02);
+  --bg: var(--bg-dark);
+  --card: var(--bg-card);
+  --border-color: var(--border);
+  --border-strong: rgba(124, 58, 237, 0.22);
+  --text: var(--text-primary);
+  --muted: var(--text-secondary);
 }
 
 * {
@@ -62,11 +64,11 @@ body {
   margin: 0;
   min-height: 100vh;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: var(--text-color);
+  color: var(--text-primary);
   background:
-    radial-gradient(circle at top left, rgba(108, 92, 231, 0.15), transparent 30%),
-    radial-gradient(circle at top right, rgba(162, 155, 254, 0.10), transparent 26%),
-    linear-gradient(180deg, var(--bg-color) 0%, var(--bg-2) 100%);
+    radial-gradient(circle at top left, rgba(124, 58, 237, 0.16), transparent 30%),
+    radial-gradient(circle at top right, rgba(167, 139, 250, 0.10), transparent 26%),
+    linear-gradient(180deg, var(--bg-dark) 0%, var(--bg-2) 100%);
   transition: background-color 180ms ease, color 180ms ease;
 }
 
@@ -88,7 +90,7 @@ body::before {
 
 .card,
 .header-card {
-  background: var(--card-color);
+  background: var(--bg-card);
   border: 1px solid var(--border-color);
   box-shadow: var(--shadow);
   border-radius: var(--radius);
@@ -123,7 +125,7 @@ body::before {
   border-radius: 14px;
   display: grid;
   place-items: center;
-  background: linear-gradient(135deg, rgba(108, 92, 231, 0.9), rgba(162, 155, 254, 0.9));
+  background: linear-gradient(135deg, var(--primary), var(--primary-light));
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -137,7 +139,7 @@ body::before {
 .eyebrow,
 .stat-kicker {
   margin: 0 0 6px;
-  color: var(--secondary);
+  color: var(--primary-light);
   text-transform: uppercase;
   letter-spacing: 0.14em;
   font-size: 0.74rem;
@@ -148,11 +150,12 @@ body::before {
   margin: 0;
   font-size: clamp(1.8rem, 4vw, 2.8rem);
   line-height: 1.05;
+  color: var(--primary);
 }
 
 .header-copy {
   margin: 8px 0 0;
-  color: var(--muted);
+  color: var(--text-secondary);
   line-height: 1.5;
 }
 
@@ -163,8 +166,8 @@ body::before {
   padding: 10px 14px;
   border-radius: 999px;
   border: 1px solid var(--border-color);
-  background: rgba(108, 92, 231, 0.08);
-  color: var(--text-color);
+  background: rgba(124, 58, 237, 0.08);
+  color: var(--text-primary);
   font: inherit;
   font-weight: 600;
   cursor: pointer;
@@ -174,11 +177,11 @@ body::before {
 .theme-toggle:hover {
   transform: translateY(-1px);
   border-color: var(--border-strong);
-  background: rgba(108, 92, 231, 0.12);
+  background: rgba(124, 58, 237, 0.12);
 }
 
 .theme-toggle:focus-visible {
-  outline: 2px solid var(--accent-color);
+  outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
 
@@ -198,7 +201,7 @@ body::before {
   border-radius: 999px;
   border: 1px solid var(--border-color);
   background: rgba(15, 23, 42, 0.42);
-  color: var(--text);
+  color: var(--text-primary);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -275,16 +278,23 @@ body::before {
   line-height: 1.05;
   font-weight: 800;
   letter-spacing: -0.04em;
+  color: var(--accent);
 }
 
 .stat-main--large {
   font-size: clamp(2.1rem, 4.4vw, 3.35rem);
 }
 
+.stat-count {
+  color: var(--accent);
+  font-size: clamp(1.5rem, 3.5vw, 2rem);
+  font-weight: 800;
+}
+
 .stat-meta,
 .stat-footnote,
 .chart-note {
-  color: var(--muted-color);
+  color: var(--text-secondary);
   font-size: 0.94rem;
   line-height: 1.5;
 }
@@ -307,8 +317,8 @@ body::before {
   font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 0.04em;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(124, 58, 237, 0.08);
+  border: 1px solid rgba(124, 58, 237, 0.14);
   text-transform: capitalize;
 }
 
@@ -344,18 +354,18 @@ body::before {
   min-height: 42px;
   padding: 10px 12px;
   border-radius: 12px;
-  background: rgba(15, 23, 42, 0.42);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(124, 58, 237, 0.06);
+  border: 1px solid rgba(124, 58, 237, 0.12);
 }
 
 .player-chip {
-  color: var(--text);
+  color: var(--text-primary);
   font-size: 0.95rem;
   font-weight: 600;
 }
 
 .empty-state {
-  color: var(--muted);
+  color: var(--text-secondary);
   grid-column: 1 / -1;
 }
 
@@ -380,7 +390,7 @@ body::before {
   min-height: 1.1em;
   color: transparent !important;
   border-radius: 10px;
-  background: linear-gradient(90deg, rgba(148, 163, 184, 0.12), rgba(148, 163, 184, 0.2), rgba(148, 163, 184, 0.12));
+  background: linear-gradient(90deg, rgba(124, 58, 237, 0.10), rgba(124, 58, 237, 0.18), rgba(124, 58, 237, 0.10));
   background-size: 200% 100%;
   animation: shimmer 1.35s linear infinite;
 }
