@@ -3,13 +3,9 @@ const axios = require('axios');
 const systeminformation = require('systeminformation');
 const { status: minecraftStatus } = require('minecraft-server-util');
 
-const rawBaseUrl = process.env.DXIR_STATS_URL || process.env.DXIR_STATS_ENDPOINT || process.env.VERCEL_URL || process.argv[2] || 'https://YOUR-VERCEL-URL';
+const rawBaseUrl = process.env.DXIR_STATS_URL || process.env.DXIR_STATS_ENDPOINT || process.env.VERCEL_URL || process.argv[2] || 'https://stats.dxir.live';
 const endpoint = normalizeEndpoint(rawBaseUrl);
 
-if (endpoint.includes('YOUR-VERCEL-URL')) {
-  console.error('Set DXIR_STATS_URL, DXIR_STATS_ENDPOINT, VERCEL_URL, or pass the deployment URL as the first argument.');
-  process.exit(1);
-}
 
 let sending = false;
 
