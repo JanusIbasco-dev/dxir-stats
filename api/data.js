@@ -1,6 +1,8 @@
-const defaultData = {
-  cpu: null,
-  ram: null,
+const HISTORY_LIMIT = 50;
+
+const defaultSnapshot = {
+  cpu: 0,
+  ram: 0,
   players: 0,
   playerList: [],
   uptime: 0,
@@ -10,7 +12,8 @@ const defaultData = {
   ready: false,
 };
 
-let latestData = null;
+let latestSnapshot = null;
+let history = [];
 
 function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -40,26 +43,37 @@ function normalizePlayerList(value) {
 }
 
 function normalizePayload(payload = {}) {
-  const players = Number.parseInt(payload.players, 10);
-  const cpu = normalizeNumber(payload.cpu, defaultData.cpu);
-  const ram = normalizeNumber(payload.ram, defaultData.ram);
-  const uptime = normalizeNumber(payload.uptime, defaultData.uptime);
-
   return {
-    cpu,
-    ram,
-    players: Number.isFinite(players) && players >= 0 ? players : defaultData.players,
+    cpu: normalizeNumber(payload.cpu, defaultSnapshot.cpu),
+    ram: normalizeNumber(payload.ram, defaultSnapshot.ram),
+    players: normalizeNumber(payload.players, defaultSnapshot.players),
     playerList: normalizePlayerList(payload.playerList),
-    uptime,
-    ip: typeof payload.ip === 'string' && payload.ip.trim() ? payload.ip.trim() : defaultData.ip,
+    uptime: normalizeNumber(payload.uptime, defaultSnapshot.uptime),
+    ip: typeof payload.ip === 'string' && payload.ip.trim() ? payload.ip.trim() : defaultSnapshot.ip,
     status: normalizeStatus(payload.status),
-    time: typeof payload.time === 'string' && payload.time.trim() ? payload.time.trim() : defaultData.time,
+    time: typeof payload.time === 'string' && payload.time.trim() ? payload.time.trim() : defaultSnapshot.time,
     ready: true,
   };
 }
 
+function cloneSnapshot(snapshot) {
+  return {
+    ...snapshot,
+    playerList: Array.isArray(snapshot.playerList) ? [...snapshot.playerList] : [],
+  };
+}
+
 function currentData() {
-  return latestData ? { ...latestData } : { ...defaultData };
+  const latest = latestSnapshot ? cloneSnapshot(latestSnapshot) : { ...defaultSnapshot };
+  return {
+    latest,
+    history: history.map(cloneSnapshot),
+  };
+}
+
+function storeSnapshot(snapshot) {
+  latestSnapshot = snapshot;
+  history = [...history, snapshot].slice(-HISTORY_LIMIT);
 }
 
 module.exports = async (req, res) => {
@@ -70,13 +84,17 @@ module.exports = async (req, res) => {
   }
 
   if (req.method === 'GET') {
-    return res.status(200).json(currentData());
+    return res.status(200).json({
+      success: true,
+      data: currentData(),
+    });
   }
 
   if (req.method === 'POST') {
     try {
       const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
-      latestData = normalizePayload(body);
+      const snapshot = normalizePayload(body);
+      storeSnapshot(snapshot);
 
       return res.status(200).json({
         success: true,
@@ -96,6 +114,3 @@ module.exports = async (req, res) => {
     error: 'Method not allowed',
   });
 };
-
-
-

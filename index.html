@@ -15,6 +15,16 @@
     <script defer src="/app.js"></script>
   </head>
   <body>
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem('dxir-theme');
+          document.body.classList.toggle('light', theme === 'light');
+        } catch (error) {
+          // Ignore storage errors.
+        }
+      })();
+    </script>
     <main class="app-shell">
       <section class="header-card card">
         <div class="brand-block">
@@ -28,9 +38,16 @@
           </div>
         </div>
 
-        <div class="connection-pill" id="connectionStatus" data-state="loading">
-          <span class="connection-pill__dot"></span>
-          <span id="connectionLabel">Connecting</span>
+        <div class="header-actions">
+          <div class="connection-pill" id="connectionStatus" data-state="loading">
+            <span class="connection-pill__dot"></span>
+            <span id="connectionLabel">Connecting</span>
+          </div>
+
+          <button class="theme-toggle" id="themeToggle" type="button" aria-pressed="false">
+            <span class="theme-toggle__icon" aria-hidden="true">☾</span>
+            <span id="themeToggleLabel">Light mode</span>
+          </button>
         </div>
       </section>
 
