@@ -14,9 +14,10 @@
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230F172A'/%3E%3Cpath d='M18 34h28v6H18zM18 24h18v6H18z' fill='%237C3AED'/%3E%3C/svg%3E"
     />
     <link rel="stylesheet" href="/style.css" />
+    <script defer src="/nav.js"></script>
     <script defer src="./leaderboard.js"></script>
   </head>
-  <body>
+  <body data-page="leaderboard">
     <script>
       (function () {
         try {
@@ -28,103 +29,127 @@
       })();
     </script>
 
-    <main class="app-shell leaderboard-shell">
-      <section class="header-card card leaderboard-header">
-        <div class="brand-block">
-          <div class="brand-mark" aria-hidden="true">
-            <span></span>
-          </div>
+    <div class="app-layout">
+      <aside class="sidebar" id="sidebarNav">
+        <div class="sidebar-brand">
+          <div class="brand-mark" aria-hidden="true"><span></span></div>
           <div>
-            <p class="eyebrow">Minecraft rankings</p>
-            <h1>DXIR STATS Leaderboard</h1>
-            <p class="header-copy">
-              Live rankings for kills, Vault economy, bounty, and total earnings.
-            </p>
+            <p class="eyebrow">Navigation</p>
+            <h2>DXIR STATS</h2>
           </div>
         </div>
 
-        <div class="header-actions leaderboard-actions">
-          <a class="theme-toggle leaderboard-back-link" href="/" aria-label="Back to dashboard">
-            <span class="theme-toggle__icon" aria-hidden="true">←</span>
+        <nav class="sidebar-nav" aria-label="Main menu">
+          <a class="sidebar-link" data-nav="dashboard" href="/">
+            <span class="sidebar-link__icon" aria-hidden="true">◧</span>
             <span>Dashboard</span>
           </a>
+          <a class="sidebar-link" data-nav="players" href="/#players-section">
+            <span class="sidebar-link__icon" aria-hidden="true">◎</span>
+            <span>Players</span>
+          </a>
+          <a class="sidebar-link is-active" data-nav="leaderboard" href="/leaderboard">
+            <span class="sidebar-link__icon" aria-hidden="true">◈</span>
+            <span>Leaderboard</span>
+          </a>
+          <a class="sidebar-link" data-nav="settings" href="/#settings-section">
+            <span class="sidebar-link__icon" aria-hidden="true">⚙</span>
+            <span>Settings</span>
+          </a>
+        </nav>
+
+        <div class="sidebar-footer">
           <button class="theme-toggle" id="themeToggle" type="button" aria-pressed="false">
             <span class="theme-toggle__icon" aria-hidden="true">☾</span>
             <span id="themeToggleLabel">Light mode</span>
           </button>
         </div>
-      </section>
+      </aside>
 
-      <section class="leaderboard-status card" id="leaderboardStatus">Loading leaderboard...</section>
+      <button class="sidebar-overlay" type="button" data-sidebar-close aria-label="Close navigation"></button>
 
-      <section class="leaderboard-toolbar card" aria-label="Leaderboard controls">
-        <label class="leaderboard-search-label" for="leaderboardSearch">Find player</label>
-        <input
-          id="leaderboardSearch"
-          class="leaderboard-search"
-          type="search"
-          placeholder="Search by username"
-          autocomplete="off"
-        />
-      </section>
+      <main class="app-shell leaderboard-shell">
+        <header class="topbar card leaderboard-header">
+          <button class="sidebar-toggle" type="button" data-sidebar-toggle aria-label="Open navigation">☰</button>
 
-      <section class="leaderboard-grid" aria-label="Minecraft leaderboard">
-        <article class="card leaderboard-card" data-leaderboard-card="topKills">
-          <div class="leaderboard-card__head">
-            <div>
-              <p class="stat-kicker">🗡️ Top Kills</p>
-              <h2 class="stat-title">Most combat victories</h2>
-            </div>
-            <span class="leaderboard-card__tag">Live</span>
+          <div class="topbar-copy">
+            <p class="eyebrow">Minecraft rankings</p>
+            <h1>DXIR STATS Leaderboard</h1>
+            <p class="header-copy">Live rankings for kills, Vault economy, bounty, and total earnings.</p>
           </div>
-          <div class="leaderboard-list" id="topKillsList"></div>
-        </article>
+        </header>
 
-        <article class="card leaderboard-card" data-leaderboard-card="richest">
-          <div class="leaderboard-card__head">
-            <div>
-              <p class="stat-kicker">💰 Richest Players</p>
-              <h2 class="stat-title">Vault economy balance</h2>
-            </div>
-            <span class="leaderboard-card__tag">Live</span>
-          </div>
-          <div class="leaderboard-list" id="richestList"></div>
-        </article>
+        <section class="leaderboard-status card" id="leaderboardStatus">Loading leaderboard...</section>
 
-        <article class="card leaderboard-card" data-leaderboard-card="bounty">
-          <div class="leaderboard-card__head">
-            <div>
-              <p class="stat-kicker">🎯 Highest Bounty</p>
-              <h2 class="stat-title">Most wanted players</h2>
-            </div>
-            <span class="leaderboard-card__tag">Live</span>
-          </div>
-          <div class="leaderboard-list" id="bountyList"></div>
-        </article>
+        <section class="leaderboard-toolbar card" aria-label="Leaderboard controls">
+          <label class="leaderboard-search-label" for="leaderboardSearch">Find player</label>
+          <input
+            id="leaderboardSearch"
+            class="leaderboard-search"
+            type="search"
+            placeholder="Search by username"
+            autocomplete="off"
+          />
+        </section>
 
-        <article class="card leaderboard-card" data-leaderboard-card="earnings">
-          <div class="leaderboard-card__head">
-            <div>
-              <p class="stat-kicker">📈 Top Earners</p>
-              <h2 class="stat-title">Highest total earnings</h2>
+        <section class="leaderboard-grid" aria-label="Minecraft leaderboard">
+          <article class="card leaderboard-card" data-leaderboard-card="topKills">
+            <div class="leaderboard-card__head">
+              <div>
+                <p class="stat-kicker">Top Kills</p>
+                <h2 class="stat-title">Most combat victories</h2>
+              </div>
+              <span class="leaderboard-card__tag">Live</span>
             </div>
-            <span class="leaderboard-card__tag">Live</span>
-          </div>
-          <div class="leaderboard-list" id="earningsList"></div>
-        </article>
+            <div class="leaderboard-list" id="topKillsList"></div>
+          </article>
 
-        <article class="card leaderboard-card" data-leaderboard-card="playtime">
-          <div class="leaderboard-card__head">
-            <div>
-              <p class="stat-kicker">⏱️ Top Playtime</p>
-              <h2 class="stat-title">Most active players</h2>
+          <article class="card leaderboard-card" data-leaderboard-card="richest">
+            <div class="leaderboard-card__head">
+              <div>
+                <p class="stat-kicker">Richest Players</p>
+                <h2 class="stat-title">Vault economy balance</h2>
+              </div>
+              <span class="leaderboard-card__tag">Live</span>
             </div>
-            <span class="leaderboard-card__tag">Live</span>
-          </div>
-          <div class="leaderboard-list" id="playtimeList"></div>
-        </article>
-      </section>
-    </main>
+            <div class="leaderboard-list" id="richestList"></div>
+          </article>
+
+          <article class="card leaderboard-card" data-leaderboard-card="bounty">
+            <div class="leaderboard-card__head">
+              <div>
+                <p class="stat-kicker">Highest Bounty</p>
+                <h2 class="stat-title">Most wanted players</h2>
+              </div>
+              <span class="leaderboard-card__tag">Live</span>
+            </div>
+            <div class="leaderboard-list" id="bountyList"></div>
+          </article>
+
+          <article class="card leaderboard-card" data-leaderboard-card="earnings">
+            <div class="leaderboard-card__head">
+              <div>
+                <p class="stat-kicker">Top Earners</p>
+                <h2 class="stat-title">Highest total earnings</h2>
+              </div>
+              <span class="leaderboard-card__tag">Live</span>
+            </div>
+            <div class="leaderboard-list" id="earningsList"></div>
+          </article>
+
+          <article class="card leaderboard-card" data-leaderboard-card="playtime">
+            <div class="leaderboard-card__head">
+              <div>
+                <p class="stat-kicker">Top Playtime</p>
+                <h2 class="stat-title">Most active players</h2>
+              </div>
+              <span class="leaderboard-card__tag">Live</span>
+            </div>
+            <div class="leaderboard-list" id="playtimeList"></div>
+          </article>
+        </section>
+      </main>
+    </div>
   </body>
 </html>
 

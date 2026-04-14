@@ -12,9 +12,10 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230F172A'/%3E%3Cpath d='M18 34h28v6H18zM18 24h18v6H18z' fill='%237C3AED'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="/style.css" />
     <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script defer src="/nav.js"></script>
     <script defer src="/app.js"></script>
   </head>
-  <body>
+  <body data-page="dashboard">
     <script>
       (function () {
         try {
@@ -25,135 +26,164 @@
         }
       })();
     </script>
-    <main class="app-shell">
-      <section class="header-card card">
-          <section class="dashboard-grid" aria-label="Server statistics">
-            <article class="card dashboard-card stats-card" aria-label="Server overview">
-              <div class="card-head">
-                <div>
-                  <p class="stat-kicker">Server Stats</p>
-                  <h2 class="stat-title">Live Overview</h2>
-                </div>
-                <span class="status-badge" id="serverValue">--</span>
-              </div>
 
-              <div class="metric-block">
-                <div class="metric-label">Uptime</div>
-                <div class="metric-value" id="uptimeValue">--</div>
-              </div>
-
-              <div class="stats-inline-grid">
-                <div class="info-chip">
-                  <span>CPU</span>
-                  <strong id="cpuValue">--</strong>
-                </div>
-                <div class="info-chip">
-                  <span>RAM</span>
-                  <strong id="ramValue">--</strong>
-                </div>
-                <div class="info-chip">
-                  <span>Players</span>
-                  <strong id="playersValue">--</strong>
-                </div>
-                <div class="info-chip">
-                  <span>IP</span>
-                  <strong id="serverIpValue">--</strong>
-                </div>
-              </div>
-
-              <p class="status-line" id="apiMessage">Waiting for the first server update...</p>
-              <p class="status-line">Last updated: <span id="timeValue">--</span></p>
-            </article>
-
-            <article class="card dashboard-card players-card" aria-label="Players panel">
-              <div class="card-head">
-                <div>
-                  <p class="stat-kicker">Players</p>
-                  <h2 class="stat-title">Online Now</h2>
-                </div>
-                <span class="stat-count" id="playersCountMirror">0</span>
-              </div>
-
-              <div class="player-list" id="playerList" aria-live="polite"></div>
-            </article>
-
-            <article class="card dashboard-card chart-card" aria-label="CPU chart">
-              <div class="card-head">
-                <div>
-                  <p class="stat-kicker">Live Chart</p>
-                  <h2 class="stat-title">CPU and RAM Trends</h2>
-                </div>
-                <span class="chart-note">Updated every 2 seconds</span>
-              </div>
-
-              <div class="chart-wrap">
-                <canvas id="usageChart" aria-label="CPU and RAM usage chart" role="img"></canvas>
-              </div>
-            </article>
-          </section>
-
-          <section class="dashboard-leaderboards" aria-label="Leaderboard preview">
-            <article class="card leaderboard-mini-card">
-              <div class="card-head compact-head">
-                <h3>Top Kills</h3>
-                <a href="/leaderboard">View all</a>
-              </div>
-              <div class="leaderboard-mini-list" id="killsLeaderboardList"></div>
-            </article>
-
-            <article class="card leaderboard-mini-card">
-              <div class="card-head compact-head">
-                <h3>Richest Players</h3>
-                <a href="/leaderboard">View all</a>
-              </div>
-              <div class="leaderboard-mini-list" id="balanceLeaderboardList"></div>
-            </article>
-
-            <article class="card leaderboard-mini-card">
-              <div class="card-head compact-head">
-                <h3>Highest Bounty</h3>
-                <a href="/leaderboard">View all</a>
-              </div>
-              <div class="leaderboard-mini-list" id="bountyLeaderboardList"></div>
-            </article>
-
-            <article class="card leaderboard-mini-card">
-              <div class="card-head compact-head">
-                <h3>Top Earners</h3>
-                <a href="/leaderboard">View all</a>
-              </div>
-              <div class="leaderboard-mini-list" id="earningsLeaderboardList"></div>
-            </article>
-          </section>
-                  <div class="player-hover-meta-block">
-                    <span>Daily</span>
-                    <strong id="playerHoverDaily">—</strong>
-                  </div>
-
-                  <div class="player-hover-meta-block">
-                    <span>Weekly</span>
-                    <strong id="playerHoverWeekly">—</strong>
-                  </div>
-                </div>
-              </div>
-            </aside>
+    <div class="app-layout">
+      <aside class="sidebar" id="sidebarNav">
+        <div class="sidebar-brand">
+          <div class="brand-mark" aria-hidden="true"><span></span></div>
+          <div>
+            <p class="eyebrow">Navigation</p>
+            <h2>DXIR STATS</h2>
           </div>
-        </article>
+        </div>
 
-        <article class="card chart-card stat-card--full">
-          <div class="chart-card__head">
-            <div>
-              <p class="stat-kicker">Live chart</p>
-              <h2 class="stat-title">CPU and RAM trends</h2>
+        <nav class="sidebar-nav" aria-label="Main menu">
+          <a class="sidebar-link is-active" data-nav="dashboard" href="/">
+            <span class="sidebar-link__icon" aria-hidden="true">◧</span>
+            <span>Dashboard</span>
+          </a>
+          <a class="sidebar-link" data-nav="players" href="/#players-section">
+            <span class="sidebar-link__icon" aria-hidden="true">◎</span>
+            <span>Players</span>
+          </a>
+          <a class="sidebar-link" data-nav="leaderboard" href="/leaderboard">
+            <span class="sidebar-link__icon" aria-hidden="true">◈</span>
+            <span>Leaderboard</span>
+          </a>
+          <a class="sidebar-link" data-nav="settings" href="#settings-section">
+            <span class="sidebar-link__icon" aria-hidden="true">⚙</span>
+            <span>Settings</span>
+          </a>
+        </nav>
+
+        <div class="sidebar-footer">
+          <button class="theme-toggle" id="themeToggle" type="button" aria-pressed="false">
+            <span class="theme-toggle__icon" aria-hidden="true">☾</span>
+            <span id="themeToggleLabel">Light mode</span>
+          </button>
+        </div>
+      </aside>
+
+      <button class="sidebar-overlay" type="button" data-sidebar-close aria-label="Close navigation"></button>
+
+      <main class="app-shell">
+        <header class="topbar card">
+          <button class="sidebar-toggle" type="button" data-sidebar-toggle aria-label="Open navigation">☰</button>
+
+          <div class="topbar-copy">
+            <p class="eyebrow">Server monitoring dashboard</p>
+            <h1>DXIR STATS</h1>
+            <p class="header-copy">Live CPU, RAM, players, and leaderboard intelligence.</p>
+          </div>
+
+          <div class="connection-pill" id="connectionStatus" data-state="loading">
+            <span class="connection-pill__dot"></span>
+            <span id="connectionLabel">Connecting</span>
+          </div>
+        </header>
+
+        <section class="dashboard-grid" aria-label="Server statistics">
+          <article class="card dashboard-card stats-card">
+            <div class="card-head">
+              <div>
+                <p class="stat-kicker">Server Stats</p>
+                <h2 class="stat-title">Live Overview</h2>
+              </div>
+              <span class="status-badge" id="serverValue">--</span>
             </div>
-            <span class="chart-note">Updated every 2 seconds</span>
-          </div>
-          <div class="chart-wrap">
-            <canvas id="usageChart" aria-label="CPU and RAM usage chart" role="img"></canvas>
-          </div>
-        </article>
-      </section>
-    </main>
+
+            <div class="metric-block">
+              <div class="metric-label">Uptime</div>
+              <div class="metric-value" id="uptimeValue">--</div>
+            </div>
+
+            <div class="stats-inline-grid">
+              <div class="info-chip">
+                <span>CPU</span>
+                <strong id="cpuValue">--</strong>
+              </div>
+              <div class="info-chip">
+                <span>RAM</span>
+                <strong id="ramValue">--</strong>
+              </div>
+              <div class="info-chip">
+                <span>Players</span>
+                <strong id="playersValue">--</strong>
+              </div>
+              <div class="info-chip">
+                <span>IP</span>
+                <strong id="serverIpValue">--</strong>
+              </div>
+            </div>
+
+            <p class="status-line" id="apiMessage">Waiting for the first server update...</p>
+            <p class="status-line">Last updated: <span id="timeValue">--</span></p>
+          </article>
+
+          <article class="card dashboard-card players-card" id="players-section">
+            <div class="card-head">
+              <div>
+                <p class="stat-kicker">Players</p>
+                <h2 class="stat-title">Online Now</h2>
+              </div>
+              <span class="stat-count" id="playersCountMirror">--</span>
+            </div>
+
+            <div class="player-list" id="playerList" aria-live="polite"></div>
+          </article>
+
+          <article class="card dashboard-card chart-card">
+            <div class="card-head">
+              <div>
+                <p class="stat-kicker">Live Chart</p>
+                <h2 class="stat-title">CPU and RAM Trends</h2>
+              </div>
+              <span class="chart-note">Updated every 2 seconds</span>
+            </div>
+
+            <div class="chart-wrap">
+              <canvas id="usageChart" aria-label="CPU and RAM usage chart" role="img"></canvas>
+            </div>
+          </article>
+        </section>
+
+        <section class="dashboard-leaderboards" aria-label="Leaderboard preview">
+          <article class="card leaderboard-mini-card">
+            <div class="card-head compact-head">
+              <h3>Top Kills</h3>
+              <a href="/leaderboard">View all</a>
+            </div>
+            <div class="leaderboard-mini-list" id="killsLeaderboardList"></div>
+          </article>
+
+          <article class="card leaderboard-mini-card">
+            <div class="card-head compact-head">
+              <h3>Richest Players</h3>
+              <a href="/leaderboard">View all</a>
+            </div>
+            <div class="leaderboard-mini-list" id="balanceLeaderboardList"></div>
+          </article>
+
+          <article class="card leaderboard-mini-card">
+            <div class="card-head compact-head">
+              <h3>Highest Bounty</h3>
+              <a href="/leaderboard">View all</a>
+            </div>
+            <div class="leaderboard-mini-list" id="bountyLeaderboardList"></div>
+          </article>
+
+          <article class="card leaderboard-mini-card">
+            <div class="card-head compact-head">
+              <h3>Top Earners</h3>
+              <a href="/leaderboard">View all</a>
+            </div>
+            <div class="leaderboard-mini-list" id="earningsLeaderboardList"></div>
+          </article>
+        </section>
+
+        <section id="settings-section" class="settings-anchor" aria-hidden="true"></section>
+      </main>
+    </div>
   </body>
 </html>
 
