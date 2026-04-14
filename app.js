@@ -189,7 +189,11 @@ function syncChartTheme() {
 }
 
 function getPlayerAvatarUrl(username) {
-  return `https://crafatar.com/avatars/${encodeURIComponent(String(username || '').trim())}?size=64&overlay`;
+  return `https://mc-heads.net/avatar/${encodeURIComponent(String(username || '').trim())}/64`;
+}
+
+function getPlayerAvatarFallbackUrl(username) {
+  return `https://minotar.net/avatar/${encodeURIComponent(String(username || '').trim())}/64`;
 }
 
 function normalizePlayerList(playerList) {
@@ -207,16 +211,34 @@ function createPlayerItem(player) {
 
   const avatar = document.createElement('img');
   avatar.className = 'player-avatar';
-  avatar.src = getPlayerAvatarUrl(player);
+  const primaryAvatarUrl = getPlayerAvatarUrl(player);
+  const fallbackAvatarUrl = getPlayerAvatarFallbackUrl(player);
+  let usedFallback = false;
+
   avatar.alt = `${player} avatar`;
   avatar.width = 38;
   avatar.height = 38;
   avatar.loading = 'lazy';
   avatar.decoding = 'async';
   avatar.referrerPolicy = 'no-referrer';
-  avatar.addEventListener('error', () => {
-    avatar.src = 'https://crafatar.com/avatars/8667ba71-b85a-4004-af54-457a9734eed7?size=64&overlay';
-  }, { once: true });
+  avatar.onload = () => {
+    avatar.classList.add('loaded');
+  };
+  avatar.onerror = () => {
+    if (!usedFallback) {
+      usedFallback = true;
+      avatar.src = fallbackAvatarUrl;
+      return;
+    }
+
+    avatar.onerror = null;
+    avatar.classList.add('loaded');
+  };
+  avatar.src = primaryAvatarUrl;
+
+  if (avatar.complete && avatar.naturalWidth > 0) {
+    avatar.classList.add('loaded');
+  }
 
   const info = document.createElement('div');
   info.className = 'player-info';
