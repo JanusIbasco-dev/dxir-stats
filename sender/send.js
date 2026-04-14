@@ -140,6 +140,10 @@ async function getMinecraftRamUsage() {
   }
 }
 
+function normalizePlayerName(player) {
+  return String(player?.name || player?.username || player?.player || '').trim();
+}
+
 async function getMinecraftStatus() {
   try {
     const result = await minecraftStatus('127.0.0.1', 25565, {
@@ -147,12 +151,16 @@ async function getMinecraftStatus() {
     });
 
     const sample = Array.isArray(result?.players?.sample) ? result.players.sample : [];
+    const latency = roundTo2(result?.latency || 0);
 
     return {
       players: Number(result?.players?.online ?? 0),
       playerList: sample
-        .map((player) => String(player?.name || '').trim())
-        .filter(Boolean),
+        .map((player) => ({
+          name: normalizePlayerName(player),
+          ping: latency,
+        }))
+        .filter((player) => player.name),
       status: 'online',
     };
   } catch (error) {
@@ -225,4 +233,3 @@ main().catch((error) => {
   console.error('[DXIR STATS] Fatal error:', error);
   process.exit(1);
 });
-

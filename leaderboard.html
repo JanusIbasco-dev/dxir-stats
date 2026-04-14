@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#7C3AED" />
+    <meta
+      name="description"
+      content="DXIR STATS leaderboard — live Minecraft rankings for kills, wealth, bounty, and earnings."
+    />
+    <title>DXIR STATS | Leaderboard</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230F172A'/%3E%3Cpath d='M18 34h28v6H18zM18 24h18v6H18z' fill='%237C3AED'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/style.css" />
+    <script defer src="./leaderboard.js"></script>
+  </head>
+  <body>
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem('dxir-theme');
+          document.body.classList.toggle('light', theme === 'light');
+        } catch (error) {
+          // Ignore storage errors.
+        }
+      })();
+    </script>
+
+    <main class="app-shell leaderboard-shell">
+      <section class="header-card card leaderboard-header">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span>
+          </div>
+          <div>
+            <p class="eyebrow">Minecraft rankings</p>
+            <h1>DXIR STATS Leaderboard</h1>
+            <p class="header-copy">
+              Live rankings for kills, Vault economy, bounty, and total earnings.
+            </p>
+          </div>
+        </div>
+
+        <div class="header-actions leaderboard-actions">
+          <a class="theme-toggle leaderboard-back-link" href="/" aria-label="Back to dashboard">
+            <span class="theme-toggle__icon" aria-hidden="true">←</span>
+            <span>Dashboard</span>
+          </a>
+          <button class="theme-toggle" id="themeToggle" type="button" aria-pressed="false">
+            <span class="theme-toggle__icon" aria-hidden="true">☾</span>
+            <span id="themeToggleLabel">Light mode</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="leaderboard-status card" id="leaderboardStatus">Loading leaderboard...</section>
+
+      <section class="leaderboard-grid" aria-label="Minecraft leaderboard">
+        <article class="card leaderboard-card" data-leaderboard-card="topKills">
+          <div class="leaderboard-card__head">
+            <div>
+              <p class="stat-kicker">🗡️ Top Kills</p>
+              <h2 class="stat-title">Most combat victories</h2>
+            </div>
+            <span class="leaderboard-card__tag">Live</span>
+          </div>
+          <div class="leaderboard-list" id="topKillsList"></div>
+        </article>
+
+        <article class="card leaderboard-card" data-leaderboard-card="richest">
+          <div class="leaderboard-card__head">
+            <div>
+              <p class="stat-kicker">💰 Richest Players</p>
+              <h2 class="stat-title">Vault economy balance</h2>
+            </div>
+            <span class="leaderboard-card__tag">Live</span>
+          </div>
+          <div class="leaderboard-list" id="richestList"></div>
+        </article>
+
+        <article class="card leaderboard-card" data-leaderboard-card="bounty">
+          <div class="leaderboard-card__head">
+            <div>
+              <p class="stat-kicker">🎯 Highest Bounty</p>
+              <h2 class="stat-title">Most wanted players</h2>
+            </div>
+            <span class="leaderboard-card__tag">Live</span>
+          </div>
+          <div class="leaderboard-list" id="bountyList"></div>
+        </article>
+
+        <article class="card leaderboard-card" data-leaderboard-card="earnings">
+          <div class="leaderboard-card__head">
+            <div>
+              <p class="stat-kicker">📈 Top Earners</p>
+              <h2 class="stat-title">Highest total earnings</h2>
+            </div>
+            <span class="leaderboard-card__tag">Live</span>
+          </div>
+          <div class="leaderboard-list" id="earningsList"></div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>
+

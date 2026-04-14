@@ -2,6 +2,14 @@
   "version": 2,
   "rewrites": [
     {
+      "source": "/leaderboard",
+      "destination": "/leaderboard.html"
+    },
+    {
+      "source": "/leaderboard/",
+      "destination": "/leaderboard.html"
+    },
+    {
       "source": "/api",
       "destination": "/api/data"
     },
@@ -11,5 +19,3 @@
     }
   ]
 }
-
-

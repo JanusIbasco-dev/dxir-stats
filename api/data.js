@@ -34,13 +34,35 @@ function normalizeNumber(value, fallback = 0) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
+function normalizePlayerEntry(value) {
+  if (typeof value === 'string') {
+    const name = value.trim();
+    return name ? { name, ping: 0 } : null;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const name = String(value.name || value.player || value.username || '').trim();
+
+  if (!name) {
+    return null;
+  }
+
+  return {
+    name,
+    ping: normalizeNumber(value.ping ?? value.latency ?? value.ms, 0),
+  };
+}
+
 function normalizePlayerList(value) {
   if (!Array.isArray(value)) {
     return [];
   }
 
   return value
-    .map((player) => String(player || '').trim())
+    .map(normalizePlayerEntry)
     .filter(Boolean)
     .slice(0, 32);
 }
@@ -66,7 +88,12 @@ function normalizePayload(payload = {}) {
 function cloneSnapshot(snapshot) {
   return {
     ...snapshot,
-    playerList: Array.isArray(snapshot.playerList) ? [...snapshot.playerList] : [],
+    playerList: Array.isArray(snapshot.playerList)
+      ? snapshot.playerList.map((player) => ({
+          name: String(player?.name || '').trim(),
+          ping: normalizeNumber(player?.ping, 0),
+        })).filter((player) => Boolean(player.name))
+      : [],
   };
 }
 

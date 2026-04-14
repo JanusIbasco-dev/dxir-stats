@@ -6,6 +6,11 @@ const state = {
   lastSeenUpdate: 0,
   lastChartSignature: '',
   theme: 'dark',
+  playerRecords: [],
+  playerSessions: new Map(),
+  playerPreviewName: '',
+  playerPinnedName: '',
+  playerTicker: null,
 };
 
 let previousPlayers = [];
@@ -26,6 +31,14 @@ const elements = {
   timeValue: document.getElementById('timeValue'),
   apiMessage: document.getElementById('apiMessage'),
   playerList: document.getElementById('playerList'),
+  playerHoverCard: document.getElementById('playerHoverCard'),
+  playerHoverPlaceholder: document.getElementById('playerHoverPlaceholder'),
+  playerHoverContent: document.getElementById('playerHoverContent'),
+  playerHoverAvatar: document.getElementById('playerHoverAvatar'),
+  playerHoverName: document.getElementById('playerHoverName'),
+  playerHoverStatus: document.getElementById('playerHoverStatus'),
+  playerHoverPing: document.getElementById('playerHoverPing'),
+  playerHoverSession: document.getElementById('playerHoverSession'),
   chartCanvas: document.getElementById('usageChart'),
   chartCard: document.getElementById('usageChart')?.closest('.chart-card'),
 };
@@ -59,6 +72,10 @@ function formatUptime(seconds) {
   return [hours > 0 ? `${hours}h` : null, `${minutes}m`, `${secs}s`]
     .filter(Boolean)
     .join(' ');
+}
+
+function formatSessionTime(joinedAt) {
+  return `Online for ${formatUptime((Date.now() - Number(joinedAt || 0)) / 1000)}`;
 }
 
 function setConnectionState(stateName, label) {
@@ -188,6 +205,26 @@ function syncChartTheme() {
   state.chart.update('none');
 }
 
+function getPlayerRecordName(player) {
+  if (typeof player === 'string') {
+    return player.trim();
+  }
+
+  if (!player || typeof player !== 'object') {
+    return '';
+  }
+
+  return String(player.name || player.player || player.username || '').trim();
+}
+
+function getPlayerRecordPing(player) {
+  if (!player || typeof player !== 'object') {
+    return 0;
+  }
+
+  return Math.max(0, normalizeNumber(player.ping ?? player.latency ?? player.ms, 0));
+}
+
 function getPlayerAvatarUrl(username) {
   return `https://mc-heads.net/avatar/${encodeURIComponent(String(username || '').trim())}/64`;
 }
@@ -196,62 +233,284 @@ function getPlayerAvatarFallbackUrl(username) {
   return `https://minotar.net/avatar/${encodeURIComponent(String(username || '').trim())}/64`;
 }
 
+function configureAvatarImage(image, username, size = 64) {
+  if (!image) {
+    return;
+  }
+
+  const normalizedName = String(username || '').trim();
+  const primary = `https://mc-heads.net/avatar/${encodeURIComponent(normalizedName)}/${size}`;
+  const fallback = `https://minotar.net/avatar/${encodeURIComponent(normalizedName)}/${size}`;
+  let usedFallback = false;
+
+  image.classList.remove('loaded');
+  image.src = primary;
+  image.onload = () => {
+    image.classList.add('loaded');
+  };
+  image.onerror = () => {
+    if (!usedFallback) {
+      usedFallback = true;
+      image.src = fallback;
+      return;
+    }
+
+    image.onerror = null;
+    image.classList.add('loaded');
+  };
+
+  if (image.complete && image.naturalWidth > 0) {
+    image.classList.add('loaded');
+  }
+}
+
 function normalizePlayerList(playerList) {
   return Array.isArray(playerList)
     ? playerList
-      .map((player) => String(player || '').trim())
+      .map((player) => {
+        const name = getPlayerRecordName(player);
+
+        if (!name) {
+          return null;
+        }
+
+        return {
+          name,
+          ping: getPlayerRecordPing(player),
+        };
+      })
       .filter(Boolean)
     : [];
+}
+
+function setPlayerHoverCardPlaceholder(message = 'Hover a player to see live details') {
+  if (elements.playerHoverCard) {
+    elements.playerHoverCard.classList.remove('is-active');
+    elements.playerHoverCard.dataset.player = '';
+  }
+
+  if (elements.playerHoverPlaceholder) {
+    elements.playerHoverPlaceholder.textContent = message;
+    elements.playerHoverPlaceholder.hidden = false;
+  }
+
+  if (elements.playerHoverContent) {
+    elements.playerHoverContent.hidden = true;
+  }
+}
+
+function syncPlayerPreviewStyles(playerName) {
+  if (!elements.playerList) {
+    return;
+  }
+
+  elements.playerList.querySelectorAll('.player-item').forEach((item) => {
+    item.classList.toggle('is-active', item.dataset.player === playerName);
+  });
+}
+
+function renderPlayerHoverCard(playerName) {
+  const record = state.playerRecords.find((player) => player.name === playerName);
+
+  if (!record) {
+    setPlayerHoverCardPlaceholder('Hover a player to see live details');
+    syncPlayerPreviewStyles('');
+    return;
+  }
+
+  const joinedAt = state.playerSessions.get(playerName) || Date.now();
+  const sessionText = formatSessionTime(joinedAt);
+  const pingText = record.ping > 0 ? `${Math.round(record.ping)} ms` : '—';
+
+  if (elements.playerHoverCard) {
+    elements.playerHoverCard.classList.add('is-active');
+    elements.playerHoverCard.dataset.player = playerName;
+  }
+
+  if (elements.playerHoverPlaceholder) {
+    elements.playerHoverPlaceholder.hidden = true;
+  }
+
+  if (elements.playerHoverContent) {
+    elements.playerHoverContent.hidden = false;
+  }
+
+  if (elements.playerHoverAvatar) {
+    configureAvatarImage(elements.playerHoverAvatar, playerName, 96);
+  }
+
+  if (elements.playerHoverName) {
+    elements.playerHoverName.textContent = playerName;
+  }
+
+  if (elements.playerHoverStatus) {
+    elements.playerHoverStatus.textContent = 'Online';
+  }
+
+  if (elements.playerHoverPing) {
+    elements.playerHoverPing.textContent = pingText;
+  }
+
+  if (elements.playerHoverSession) {
+    elements.playerHoverSession.textContent = sessionText;
+  }
+
+  syncPlayerPreviewStyles(playerName);
+}
+
+function setPlayerPreview(playerName, pinned = false) {
+  const normalizedName = String(playerName || '').trim();
+
+  if (!normalizedName) {
+    return;
+  }
+
+  state.playerPreviewName = normalizedName;
+
+  if (pinned) {
+    state.playerPinnedName = normalizedName;
+  }
+
+  renderPlayerHoverCard(normalizedName);
+}
+
+function clearPlayerPreview() {
+  state.playerPinnedName = '';
+  state.playerPreviewName = '';
+
+  if (state.playerRecords.length) {
+    setPlayerHoverCardPlaceholder('Hover a player to see live details');
+    syncPlayerPreviewStyles('');
+  } else {
+    setPlayerHoverCardPlaceholder('No players online');
+  }
+}
+
+function buildPlayerRecordSignature(players) {
+  return players.map((player) => `${player.name}:${player.ping}`).join('|');
+}
+
+function ensurePlayerSessions(players) {
+  const nextNames = new Set(players.map((player) => player.name));
+
+  Array.from(state.playerSessions.keys()).forEach((name) => {
+    if (!nextNames.has(name)) {
+      state.playerSessions.delete(name);
+    }
+  });
+
+  players.forEach((player) => {
+    if (!state.playerSessions.has(player.name)) {
+      state.playerSessions.set(player.name, Date.now());
+    }
+  });
 }
 
 function createPlayerItem(player) {
   const item = document.createElement('div');
   item.className = 'player-item';
-  item.dataset.player = player;
+  item.dataset.player = player.name;
+  item.tabIndex = 0;
+  item.setAttribute('role', 'button');
+  item.setAttribute('aria-label', `${player.name} profile`);
+
+  const left = document.createElement('div');
+  left.className = 'player-item__left';
+
+  const statusDot = document.createElement('span');
+  statusDot.className = 'player-status-dot';
+  statusDot.setAttribute('aria-hidden', 'true');
+
+  const avatarShell = document.createElement('div');
+  avatarShell.className = 'player-avatar-shell';
 
   const avatar = document.createElement('img');
   avatar.className = 'player-avatar';
-  const primaryAvatarUrl = getPlayerAvatarUrl(player);
-  const fallbackAvatarUrl = getPlayerAvatarFallbackUrl(player);
-  let usedFallback = false;
-
-  avatar.alt = `${player} avatar`;
+  avatar.alt = `${player.name} avatar`;
   avatar.width = 38;
   avatar.height = 38;
   avatar.loading = 'lazy';
   avatar.decoding = 'async';
   avatar.referrerPolicy = 'no-referrer';
-  avatar.onload = () => {
-    avatar.classList.add('loaded');
-  };
-  avatar.onerror = () => {
-    if (!usedFallback) {
-      usedFallback = true;
-      avatar.src = fallbackAvatarUrl;
-      return;
-    }
+  configureAvatarImage(avatar, player.name, 64);
 
-    avatar.onerror = null;
-    avatar.classList.add('loaded');
-  };
-  avatar.src = primaryAvatarUrl;
-
-  if (avatar.complete && avatar.naturalWidth > 0) {
-    avatar.classList.add('loaded');
-  }
+  avatarShell.appendChild(avatar);
+  avatarShell.appendChild(statusDot);
 
   const info = document.createElement('div');
   info.className = 'player-info';
 
   const name = document.createElement('span');
   name.className = 'player-name';
-  name.textContent = player;
+  name.textContent = player.name;
+
+  const session = document.createElement('span');
+  session.className = 'player-session';
+  session.dataset.playerSessionName = player.name;
+  session.textContent = 'Online for 0s';
 
   info.appendChild(name);
-  item.appendChild(avatar);
-  item.appendChild(info);
+  info.appendChild(session);
+  left.appendChild(avatarShell);
+  left.appendChild(info);
+
+  const right = document.createElement('div');
+  right.className = 'player-item__right';
+
+  const ping = document.createElement('span');
+  ping.className = 'player-ping-badge';
+  ping.dataset.playerPingName = player.name;
+  ping.textContent = player.ping > 0 ? `${Math.round(player.ping)} ms` : 'Ping: —';
+
+  right.appendChild(ping);
+  item.appendChild(left);
+  item.appendChild(right);
+
+  const activate = () => setPlayerPreview(player.name);
+  const pin = () => setPlayerPreview(player.name, true);
+
+  item.addEventListener('mouseenter', activate);
+  item.addEventListener('focus', activate);
+  item.addEventListener('click', pin);
+  item.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      pin();
+    }
+  });
 
   return item;
+}
+
+function updatePlayerItem(item, player) {
+  if (!item) {
+    return;
+  }
+
+  item.dataset.player = player.name;
+
+  const avatar = item.querySelector('.player-avatar');
+  if (avatar) {
+    avatar.alt = `${player.name} avatar`;
+    configureAvatarImage(avatar, player.name, 64);
+  }
+
+  const name = item.querySelector('.player-name');
+  if (name) {
+    name.textContent = player.name;
+  }
+
+  const session = item.querySelector('.player-session');
+  if (session) {
+    session.dataset.playerSessionName = player.name;
+    session.textContent = formatSessionTime(state.playerSessions.get(player.name) || Date.now());
+  }
+
+  const ping = item.querySelector('.player-ping-badge');
+  if (ping) {
+    ping.dataset.playerPingName = player.name;
+    ping.textContent = player.ping > 0 ? `${Math.round(player.ping)} ms` : 'Ping: —';
+  }
 }
 
 function renderEmptyPlayerState() {
@@ -263,6 +522,7 @@ function renderEmptyPlayerState() {
   empty.className = 'empty-state empty-state--players';
   empty.textContent = 'No players online';
   elements.playerList.replaceChildren(empty);
+  setPlayerHoverCardPlaceholder('No players online');
 }
 
 function syncPlayerListDom(players) {
@@ -271,26 +531,42 @@ function syncPlayerListDom(players) {
   }
 
   if (!players.length) {
+    state.playerRecords = [];
+    previousPlayers = [];
+    state.playerSessions.clear();
     renderEmptyPlayerState();
     return;
   }
 
   const listElement = elements.playerList;
-  const existingItems = Array.from(listElement.querySelectorAll('.player-item'));
-  const existingByName = new Map(existingItems.map((item) => [item.dataset.player || '', item]));
+  const existingItems = new Map(
+    Array.from(listElement.querySelectorAll('.player-item')).map((item) => [item.dataset.player || '', item])
+  );
+  const nextNames = new Set(players.map((player) => player.name));
 
-  existingByName.forEach((item, playerName) => {
-    if (!players.includes(playerName)) {
+  existingItems.forEach((item, name) => {
+    if (!nextNames.has(name)) {
       item.remove();
-      existingByName.delete(playerName);
     }
   });
 
+  const fragment = document.createDocumentFragment();
+
   players.forEach((player) => {
-    const existing = existingByName.get(player);
-    const item = existing || createPlayerItem(player);
-    listElement.appendChild(item);
+    let item = existingItems.get(player.name);
+
+    if (!item) {
+      item = createPlayerItem(player);
+      item.classList.add('player-item--entering');
+      window.setTimeout(() => item.classList.remove('player-item--entering'), 180);
+    } else {
+      updatePlayerItem(item, player);
+    }
+
+    fragment.appendChild(item);
   });
+
+  listElement.appendChild(fragment);
 }
 
 function renderPlayerList(playerList) {
@@ -301,12 +577,67 @@ function renderPlayerList(playerList) {
   const players = normalizePlayerList(playerList);
   const isSame = JSON.stringify(previousPlayers) === JSON.stringify(players);
 
-  if (isSame) {
+  state.playerRecords = players;
+  ensurePlayerSessions(players);
+
+  if (!isSame) {
+    previousPlayers = [...players];
+    syncPlayerListDom(players);
+  }
+
+  if (!players.length) {
+    clearPlayerPreview();
     return;
   }
 
-  previousPlayers = [...players];
-  syncPlayerListDom(players);
+  const currentPinnedExists = state.playerPinnedName && players.some((player) => player.name === state.playerPinnedName);
+  const currentPreviewExists = state.playerPreviewName && players.some((player) => player.name === state.playerPreviewName);
+  const preferredPreview = currentPinnedExists
+    ? state.playerPinnedName
+    : currentPreviewExists
+      ? state.playerPreviewName
+      : '';
+
+  if (preferredPreview) {
+    renderPlayerHoverCard(preferredPreview);
+    return;
+  }
+
+  state.playerPinnedName = '';
+  state.playerPreviewName = '';
+  setPlayerHoverCardPlaceholder('Hover a player to see live details');
+}
+
+function updatePlayerSessionTimes() {
+  if (!elements.playerList) {
+    return;
+  }
+
+  const now = Date.now();
+
+  elements.playerList.querySelectorAll('.player-session').forEach((node) => {
+    const playerName = node.dataset.playerSessionName || '';
+    const joinedAt = state.playerSessions.get(playerName);
+
+    if (joinedAt) {
+      node.textContent = `Online for ${formatUptime((now - joinedAt) / 1000)}`;
+    }
+  });
+
+  if (state.playerPreviewName) {
+    const previewRecord = state.playerRecords.find((player) => player.name === state.playerPreviewName);
+    if (previewRecord) {
+      renderPlayerHoverCard(previewRecord.name);
+    }
+  }
+}
+
+function startPlayerTicker() {
+  if (state.playerTicker) {
+    window.clearInterval(state.playerTicker);
+  }
+
+  state.playerTicker = window.setInterval(updatePlayerSessionTimes, 1000);
 }
 
 function initChart() {
@@ -586,6 +917,7 @@ async function fetchStats() {
 
 function startPolling() {
   fetchStats();
+  startPlayerTicker();
   state.timer = window.setInterval(fetchStats, 2000);
 }
 
@@ -595,6 +927,26 @@ function bindEvents() {
       applyTheme(state.theme === 'light' ? 'dark' : 'light');
     });
   }
+
+  document.addEventListener('click', (event) => {
+    const target = event.target;
+
+    if (elements.playerList?.contains(target) || elements.playerHoverCard?.contains(target)) {
+      return;
+    }
+
+    if (!state.playerPinnedName) {
+      return;
+    }
+
+    state.playerPinnedName = '';
+
+    if (state.playerPreviewName && state.playerRecords.some((player) => player.name === state.playerPreviewName)) {
+      renderPlayerHoverCard(state.playerPreviewName);
+    } else {
+      setPlayerHoverCardPlaceholder(state.playerRecords.length ? 'Hover a player to see live details' : 'No players online');
+    }
+  });
 }
 
 function bootstrapTheme() {
