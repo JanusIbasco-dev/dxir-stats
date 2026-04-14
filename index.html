@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#050816" />
+    <meta
+      name="description"
+      content="DXIR STATS — a live server dashboard for CPU, RAM, player count, and server status."
+    />
+    <title>DXIR STATS</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23050a14'/%3E%3Cpath d='M18 34h28v6H18zM18 24h18v6H18z' fill='%2357e7ff'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/style.css" />
+    <script defer src="/app.js"></script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero glass-card">
+        <div class="hero__brand">
+          <div class="logo-mark" aria-hidden="true">
+            <span></span>
+          </div>
+          <div>
+            <p class="eyebrow">Live system monitoring</p>
+            <h1>DXIR STATS</h1>
+          </div>
+        </div>
+
+        <div class="hero__meta">
+          <div class="status-pill" id="connectionStatus" data-state="loading">
+            <span class="status-pill__dot"></span>
+            <span id="connectionLabel">Connecting</span>
+          </div>
+          <p class="hero__subtitle">Server health, player count, and resource usage in real time.</p>
+        </div>
+      </section>
+
+      <section class="dashboard-grid" aria-label="Server statistics">
+        <article class="stat-card glass-card stat-card--accent">
+          <div class="stat-card__header">
+            <span class="stat-card__icon">CPU</span>
+            <span class="stat-card__label">Processor usage</span>
+          </div>
+          <div class="stat-card__value" id="cpuValue">--</div>
+          <div class="stat-card__footer">Current load across all cores</div>
+        </article>
+
+        <article class="stat-card glass-card stat-card--accent-2">
+          <div class="stat-card__header">
+            <span class="stat-card__icon">RAM</span>
+            <span class="stat-card__label">Memory usage</span>
+          </div>
+          <div class="stat-card__value" id="ramValue">--</div>
+          <div class="stat-card__footer">Used vs total system memory</div>
+        </article>
+
+        <article class="stat-card glass-card stat-card--accent-3">
+          <div class="stat-card__header">
+            <span class="stat-card__icon">PLAYERS</span>
+            <span class="stat-card__label">Minecraft players</span>
+          </div>
+          <div class="stat-card__value" id="playersValue">--</div>
+          <div class="stat-card__footer">Online on localhost:25565</div>
+        </article>
+
+        <article class="stat-card glass-card stat-card--accent-4">
+          <div class="stat-card__header">
+            <span class="stat-card__icon">STATUS</span>
+            <span class="stat-card__label">Server status</span>
+          </div>
+          <div class="stat-card__value stat-card__value--status" id="serverValue">--</div>
+          <div class="stat-card__footer">Online / offline health indicator</div>
+        </article>
+
+        <article class="stat-card glass-card stat-card--wide">
+          <div class="stat-card__header">
+            <span class="stat-card__icon">TIME</span>
+            <span class="stat-card__label">Last updated</span>
+          </div>
+          <div class="stat-card__value stat-card__value--time" id="timeValue">--</div>
+          <div class="stat-card__footer" id="apiMessage">Waiting for the first update...</div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>
+
+

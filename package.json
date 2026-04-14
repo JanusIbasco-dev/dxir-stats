@@ -1,0 +1,20 @@
+{
+  "name": "dxir-stats",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DXIR STATS — a Vercel-ready live server dashboard and sender script.",
+  "main": "api/data.js",
+  "scripts": {
+    "send": "node sender/send.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "axios": "^1.15.0",
+    "minecraft-server-util": "^5.0.0",
+    "systeminformation": "^5.31.0"
+  }
+}
+
+
