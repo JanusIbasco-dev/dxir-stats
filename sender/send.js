@@ -1,8 +1,9 @@
-const os = require('os');
 const axios = require('axios');
 const systeminformation = require('systeminformation');
 const { status: minecraftStatus } = require('minecraft-server-util');
 
+const DEFAULT_IP = 'dxir.live';
+const startedAt = Date.now();
 const rawBaseUrl = process.env.DXIR_STATS_URL || process.env.DXIR_STATS_ENDPOINT || process.env.VERCEL_URL || process.argv[2] || 'https://stats.dxir.live';
 const endpoint = normalizeEndpoint(rawBaseUrl);
 
@@ -37,24 +38,39 @@ function formatTimestamp(date = new Date()) {
   return date.toLocaleTimeString([], {
     hour: 'numeric',
     minute: '2-digit',
+    second: '2-digit',
   });
 }
 
 async function getCpuUsage() {
   const load = await systeminformation.currentLoad();
-  return `${Math.round(load.currentLoad)}%`;
+  return Math.round(load.currentLoad * 10) / 10;
 }
 
-async function getRamUsage() {
-  const memory = await systeminformation.mem();
-  const totalMb = memory.total / 1024 / 1024;
-  const usedMb = memory.active / 1024 / 1024;
+async function getJavaProcessRamUsage() {
+  try {
+    const processes = await systeminformation.processes();
+    const candidates = Array.isArray(processes?.list) ? processes.list : [];
 
-  if (totalMb >= 1024) {
-    return `${(usedMb / 1024).toFixed(1)} GB / ${(totalMb / 1024).toFixed(1)} GB`;
+    const javaProcess = candidates
+      .filter((processInfo) => {
+        const name = String(processInfo?.name || '').toLowerCase();
+        const command = String(processInfo?.command || processInfo?.cmd || processInfo?.path || '').toLowerCase();
+
+        return name.includes('java') || command.includes('java');
+      })
+      .sort((a, b) => Number(b?.memRss || 0) - Number(a?.memRss || 0))[0];
+
+    const memoryBytes = Number(javaProcess?.memRss || javaProcess?.mem || 0);
+
+    if (!Number.isFinite(memoryBytes) || memoryBytes <= 0) {
+      return 0;
+    }
+
+    return Math.round(memoryBytes / 1024 / 1024);
+  } catch (error) {
+    return 0;
   }
-
-  return `${Math.round(usedMb)} MB / ${Math.round(totalMb)} MB`;
 }
 
 async function getMinecraftStatus() {
@@ -63,13 +79,19 @@ async function getMinecraftStatus() {
       timeout: 2500,
     });
 
+    const sample = Array.isArray(result?.players?.sample) ? result.players.sample : [];
+
     return {
       players: Number(result?.players?.online ?? 0),
+      playerList: sample
+        .map((player) => String(player?.name || '').trim())
+        .filter(Boolean),
       status: 'online',
     };
   } catch (error) {
     return {
       players: 0,
+      playerList: [],
       status: 'offline',
     };
   }
@@ -78,7 +100,7 @@ async function getMinecraftStatus() {
 async function buildPayload() {
   const [cpu, ram, minecraft] = await Promise.all([
     getCpuUsage(),
-    getRamUsage(),
+    getJavaProcessRamUsage(),
     getMinecraftStatus(),
   ]);
 
@@ -86,9 +108,11 @@ async function buildPayload() {
     cpu,
     ram,
     players: minecraft.players,
+    playerList: minecraft.playerList,
+    uptime: Math.floor((Date.now() - startedAt) / 1000),
+    ip: DEFAULT_IP,
     status: minecraft.status,
     time: formatTimestamp(),
-    host: os.hostname(),
   };
 }
 
@@ -108,7 +132,7 @@ async function sendOnce() {
       },
     });
 
-    console.log(`[DXIR STATS] ${payload.status.toUpperCase()} | CPU ${payload.cpu} | RAM ${payload.ram} | Players ${payload.players} | ${response.status}`);
+    console.log(`[DXIR STATS] ${payload.status.toUpperCase()} | CPU ${payload.cpu}% | RAM ${payload.ram} MB | Players ${payload.players} | Uptime ${payload.uptime}s | ${response.status}`);
   } catch (error) {
     const message = error?.response
       ? `HTTP ${error.response.status}`

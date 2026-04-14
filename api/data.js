@@ -1,7 +1,10 @@
 const defaultData = {
-  cpu: '--',
-  ram: '--',
+  cpu: null,
+  ram: null,
   players: 0,
+  playerList: [],
+  uptime: 0,
+  ip: 'dxir.live',
   status: 'offline',
   time: '--',
   ready: false,
@@ -20,13 +23,35 @@ function normalizeStatus(value) {
   return String(value || 'offline').trim().toLowerCase() === 'online' ? 'online' : 'offline';
 }
 
+function normalizeNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function normalizePlayerList(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((player) => String(player || '').trim())
+    .filter(Boolean)
+    .slice(0, 32);
+}
+
 function normalizePayload(payload = {}) {
   const players = Number.parseInt(payload.players, 10);
+  const cpu = normalizeNumber(payload.cpu, defaultData.cpu);
+  const ram = normalizeNumber(payload.ram, defaultData.ram);
+  const uptime = normalizeNumber(payload.uptime, defaultData.uptime);
 
   return {
-    cpu: typeof payload.cpu === 'string' && payload.cpu.trim() ? payload.cpu.trim() : defaultData.cpu,
-    ram: typeof payload.ram === 'string' && payload.ram.trim() ? payload.ram.trim() : defaultData.ram,
+    cpu,
+    ram,
     players: Number.isFinite(players) && players >= 0 ? players : defaultData.players,
+    playerList: normalizePlayerList(payload.playerList),
+    uptime,
+    ip: typeof payload.ip === 'string' && payload.ip.trim() ? payload.ip.trim() : defaultData.ip,
     status: normalizeStatus(payload.status),
     time: typeof payload.time === 'string' && payload.time.trim() ? payload.time.trim() : defaultData.time,
     ready: true,
@@ -71,5 +96,6 @@ module.exports = async (req, res) => {
     error: 'Method not allowed',
   });
 };
+
 
 
