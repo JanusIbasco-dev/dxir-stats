@@ -1,21 +1,29 @@
+const POLL_INTERVAL_MS = 2000;
+const PLAYTIME_REFRESH_MS = 8000;
+const PLAYTIME_TICK_MS = 1000;
+const OFFLINE_THRESHOLD_MS = 8000;
+const PLAYER_RENDER_THROTTLE_MS = 140;
+const THEME_STORAGE_KEY = 'dxir-theme';
+
 const state = {
   hasData: false,
-  timer: null,
+  pollTimer: null,
+  playtimeFetchTimer: null,
+  playtimeTickTimer: null,
   chart: null,
   maxPoints: 50,
   lastSeenUpdate: 0,
+  lastFreshAt: 0,
   lastChartSignature: '',
   theme: 'dark',
-  playerRecords: [],
-  playerSessions: new Map(),
-  playerPreviewName: '',
-  playerPinnedName: '',
-  playerTicker: null,
+  players: [],
+  playerNodeMap: new Map(),
+  playerStatsMap: new Map(),
+  playerAvatarCache: new Map(),
+  selectedPlayerKey: '',
+  pendingPlayerRender: null,
+  playerRenderAt: 0,
 };
-
-let previousPlayers = [];
-
-const THEME_STORAGE_KEY = 'dxir-theme';
 
 const elements = {
   connectionStatus: document.getElementById('connectionStatus'),
@@ -39,6 +47,9 @@ const elements = {
   playerHoverStatus: document.getElementById('playerHoverStatus'),
   playerHoverPing: document.getElementById('playerHoverPing'),
   playerHoverSession: document.getElementById('playerHoverSession'),
+  playerHoverTotal: document.getElementById('playerHoverTotal'),
+  playerHoverDaily: document.getElementById('playerHoverDaily'),
+  playerHoverWeekly: document.getElementById('playerHoverWeekly'),
   chartCanvas: document.getElementById('usageChart'),
   chartCard: document.getElementById('usageChart')?.closest('.chart-card'),
 };
@@ -50,7 +61,7 @@ const chartState = {
 };
 
 function normalizeNumber(value, fallback = 0) {
-  const parsed = Number.parseFloat(String(value).replace(/[^0-9.-]/g, ''));
+  const parsed = Number.parseFloat(String(value ?? '').replace(/[^0-9.-]/g, ''));
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
@@ -69,45 +80,18 @@ function formatUptime(seconds) {
     return `${secs}s`;
   }
 
-  return [hours > 0 ? `${hours}h` : null, `${minutes}m`, `${secs}s`]
-    .filter(Boolean)
-    .join(' ');
+  return [hours > 0 ? `${hours}h` : null, `${minutes}m`, `${secs}s`].filter(Boolean).join(' ');
 }
 
-function formatSessionTime(joinedAt) {
-  return `Online for ${formatUptime((Date.now() - Number(joinedAt || 0)) / 1000)}`;
-}
-
-function setConnectionState(stateName, label) {
-  if (elements.connectionStatus) {
-    elements.connectionStatus.dataset.state = stateName;
+function formatSecondsAgo(timestampMs) {
+  const delta = Math.max(0, Math.floor((Date.now() - Number(timestampMs || 0)) / 1000));
+  if (delta < 60) {
+    return `${delta}s ago`;
   }
 
-  if (elements.connectionLabel) {
-    elements.connectionLabel.textContent = label;
-  }
-}
-
-function setLoadingNodes(isLoading) {
-  [
-    elements.uptimeValue,
-    elements.serverIpValue,
-    elements.cpuValue,
-    elements.ramValue,
-    elements.playersValue,
-    elements.serverValue,
-    elements.timeValue,
-  ].forEach((node) => {
-    if (node) {
-      node.classList.toggle('is-loading', isLoading);
-    }
-  });
-}
-
-function setChartOpacity(isOffline) {
-  if (elements.chartCard) {
-    elements.chartCard.style.opacity = isOffline ? '0.72' : '1';
-  }
+  const mins = Math.floor(delta / 60);
+  const secs = delta % 60;
+  return `${mins}m ${secs}s ago`;
 }
 
 function getThemeFromStorage() {
@@ -121,12 +105,10 @@ function getThemeFromStorage() {
 
 function updateThemeButton(theme) {
   const isLight = theme === 'light';
-
   if (elements.themeToggle) {
     elements.themeToggle.setAttribute('aria-pressed', String(isLight));
     elements.themeToggle.dataset.theme = isLight ? 'light' : 'dark';
   }
-
   if (elements.themeToggleLabel) {
     elements.themeToggleLabel.textContent = isLight ? 'Dark mode' : 'Light mode';
   }
@@ -135,7 +117,6 @@ function updateThemeButton(theme) {
 function applyTheme(theme, persist = true) {
   const nextTheme = theme === 'light' ? 'light' : 'dark';
   state.theme = nextTheme;
-
   document.body.classList.toggle('light', nextTheme === 'light');
   updateThemeButton(nextTheme);
 
@@ -152,21 +133,34 @@ function applyTheme(theme, persist = true) {
   }
 }
 
+function setConnectionState(stateName, label) {
+  if (elements.connectionStatus) {
+    elements.connectionStatus.dataset.state = stateName;
+  }
+  if (elements.connectionLabel) {
+    elements.connectionLabel.textContent = label;
+  }
+}
+
+function setChartOpacity(isOffline) {
+  if (elements.chartCard) {
+    elements.chartCard.style.opacity = isOffline ? '0.72' : '1';
+  }
+}
+
 function getCssVar(name) {
   return getComputedStyle(document.body).getPropertyValue(name).trim();
 }
 
 function hexToRgba(hex, alpha) {
-  const normalized = String(hex || '').trim().replace('#', '');
-
-  if (normalized.length !== 6) {
+  const value = String(hex || '').trim().replace('#', '');
+  if (value.length !== 6) {
     return `rgba(124, 58, 237, ${alpha})`;
   }
 
-  const r = Number.parseInt(normalized.slice(0, 2), 16);
-  const g = Number.parseInt(normalized.slice(2, 4), 16);
-  const b = Number.parseInt(normalized.slice(4, 6), 16);
-
+  const r = Number.parseInt(value.slice(0, 2), 16);
+  const g = Number.parseInt(value.slice(2, 4), 16);
+  const b = Number.parseInt(value.slice(4, 6), 16);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
@@ -175,7 +169,7 @@ function getChartPalette() {
     cpu: getCssVar('--chart-cpu') || '#7C3AED',
     ram: getCssVar('--chart-ram') || '#8B5CF6',
     grid: getCssVar('--chart-grid') || 'rgba(148, 163, 184, 0.14)',
-    ticks: getCssVar('--chart-ticks') || '#9CA3AF',
+    ticks: getCssVar('--chart-ticks') || '#94A3B8',
     tooltipBg: getCssVar('--chart-tooltip-bg') || '#111827',
     tooltipBorder: getCssVar('--chart-tooltip-border') || 'rgba(148, 163, 184, 0.2)',
   };
@@ -190,13 +184,12 @@ function syncChartTheme() {
   const [cpuDataset, ramDataset] = state.chart.data.datasets;
 
   cpuDataset.borderColor = palette.cpu;
-  cpuDataset.backgroundColor = hexToRgba(palette.cpu, 0.12);
+  cpuDataset.backgroundColor = hexToRgba(palette.cpu, 0.15);
   ramDataset.borderColor = palette.ram;
-  ramDataset.backgroundColor = hexToRgba(palette.ram, 0.10);
+  ramDataset.backgroundColor = hexToRgba(palette.ram, 0.12);
 
   state.chart.options.scales.x.grid.color = palette.grid;
   state.chart.options.scales.y.grid.color = palette.grid;
-  state.chart.options.scales.y1.grid.color = 'transparent';
   state.chart.options.scales.x.ticks.color = palette.ticks;
   state.chart.options.scales.y.ticks.color = palette.ticks;
   state.chart.options.scales.y1.ticks.color = palette.ticks;
@@ -205,53 +198,160 @@ function syncChartTheme() {
   state.chart.update('none');
 }
 
-function getPlayerRecordName(player) {
-  if (typeof player === 'string') {
-    return player.trim();
-  }
-
-  if (!player || typeof player !== 'object') {
-    return '';
-  }
-
-  return String(player.name || player.player || player.username || '').trim();
-}
-
-function getPlayerRecordPing(player) {
-  if (!player || typeof player !== 'object') {
-    return 0;
-  }
-
-  return Math.max(0, normalizeNumber(player.ping ?? player.latency ?? player.ms, 0));
-}
-
-function getPlayerAvatarUrl(username) {
-  return `https://mc-heads.net/avatar/${encodeURIComponent(String(username || '').trim())}/64`;
-}
-
-function getPlayerAvatarFallbackUrl(username) {
-  return `https://minotar.net/avatar/${encodeURIComponent(String(username || '').trim())}/64`;
-}
-
-function configureAvatarImage(image, username, size = 64) {
-  if (!image) {
+function initChart() {
+  if (!window.Chart || !elements.chartCanvas) {
     return;
   }
 
-  const normalizedName = String(username || '').trim();
-  const primary = `https://mc-heads.net/avatar/${encodeURIComponent(normalizedName)}/${size}`;
-  const fallback = `https://minotar.net/avatar/${encodeURIComponent(normalizedName)}/${size}`;
-  let usedFallback = false;
+  const palette = getChartPalette();
+  state.chart = new Chart(elements.chartCanvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: chartState.labels,
+      datasets: [
+        {
+          label: 'CPU (%)',
+          data: chartState.cpuData,
+          yAxisID: 'y',
+          borderColor: palette.cpu,
+          backgroundColor: hexToRgba(palette.cpu, 0.15),
+          fill: true,
+          tension: 0.32,
+          borderWidth: 2,
+          pointRadius: 0,
+        },
+        {
+          label: 'RAM (MB)',
+          data: chartState.ramData,
+          yAxisID: 'y1',
+          borderColor: palette.ram,
+          backgroundColor: hexToRgba(palette.ram, 0.12),
+          fill: true,
+          tension: 0.32,
+          borderWidth: 2,
+          pointRadius: 0,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { color: palette.ticks, usePointStyle: true, boxWidth: 10, boxHeight: 10, padding: 16 },
+        },
+        tooltip: {
+          backgroundColor: palette.tooltipBg,
+          borderColor: palette.tooltipBorder,
+          borderWidth: 1,
+          titleColor: getCssVar('--text-primary') || '#E5E7EB',
+          bodyColor: getCssVar('--text-primary') || '#E5E7EB',
+          padding: 10,
+        },
+      },
+      scales: {
+        x: { ticks: { color: palette.ticks }, grid: { color: palette.grid } },
+        y: { beginAtZero: true, suggestedMax: 100, ticks: { color: palette.ticks }, grid: { color: palette.grid } },
+        y1: { beginAtZero: true, position: 'right', ticks: { color: palette.ticks }, grid: { drawOnChartArea: false } },
+      },
+    },
+  });
+}
 
-  image.classList.remove('loaded');
-  image.src = primary;
-  image.onload = () => {
-    image.classList.add('loaded');
+function buildHistorySignature(history) {
+  return history.map((item) => `${item.lastUpdate}|${item.time}|${item.cpu}|${item.ram}`).join('~');
+}
+
+function applyHistoryToChart(history) {
+  if (!state.chart) {
+    return;
+  }
+
+  const points = Array.isArray(history) ? history.slice(-state.maxPoints) : [];
+  const signature = buildHistorySignature(points);
+  if (signature === state.lastChartSignature) {
+    return;
+  }
+
+  state.lastChartSignature = signature;
+  chartState.labels = points.map((point) => normalizeString(point.time, '--'));
+  chartState.cpuData = points.map((point) => normalizeNumber(point.cpu, 0));
+  chartState.ramData = points.map((point) => normalizeNumber(point.ram, 0));
+
+  state.chart.data.labels = [...chartState.labels];
+  state.chart.data.datasets[0].data = [...chartState.cpuData];
+  state.chart.data.datasets[1].data = [...chartState.ramData];
+  state.chart.update();
+}
+
+function unwrapApiPayload(payload) {
+  const root = payload && typeof payload === 'object' ? payload : {};
+  const data = root.data && typeof root.data === 'object' ? root.data : root;
+  if (data && typeof data === 'object' && ('latest' in data || Array.isArray(data.history))) {
+    return { latest: data.latest || null, history: Array.isArray(data.history) ? data.history : [] };
+  }
+  return { latest: data || null, history: Array.isArray(root.history) ? root.history : [] };
+}
+
+function normalizePlayer(rawPlayer) {
+  if (!rawPlayer || typeof rawPlayer !== 'object') {
+    return null;
+  }
+
+  const name = String(rawPlayer.name || rawPlayer.username || rawPlayer.player || '').trim();
+  const uuid = String(rawPlayer.uuid || rawPlayer.id || '').trim();
+  const key = uuid || name.toLowerCase();
+
+  if (!name || !key) {
+    return null;
+  }
+
+  return {
+    key,
+    uuid,
+    name,
+    status: String(rawPlayer.status || 'online').toLowerCase() === 'offline' ? 'offline' : 'online',
+    ping: Math.max(0, normalizeNumber(rawPlayer.ping, 0)),
+    isAFK: Boolean(rawPlayer.isAFK),
+    sessionTime: Math.max(0, Math.floor(normalizeNumber(rawPlayer.sessionTime, 0))),
+    totalPlaytime: Math.max(0, Math.floor(normalizeNumber(rawPlayer.totalPlaytime, 0))),
+    dailyPlaytime: Math.max(0, Math.floor(normalizeNumber(rawPlayer.dailyPlaytime, 0))),
+    weeklyPlaytime: Math.max(0, Math.floor(normalizeNumber(rawPlayer.weeklyPlaytime, 0))),
   };
+}
+
+function configureAvatarImage(image, player, size = 64) {
+  if (!image || !player) {
+    return;
+  }
+
+  const cache = state.playerAvatarCache.get(player.key) || {};
+  const primarySource = player.uuid || player.name;
+  const primary = `https://mc-heads.net/avatar/${encodeURIComponent(primarySource)}/${size}`;
+  const fallback = `https://minotar.net/avatar/${encodeURIComponent(player.name)}/${size}`;
+
+  image.alt = `${player.name} avatar`;
+  image.dataset.avatarKey = player.key;
+  image.classList.remove('loaded');
+
+  if (cache.current && image.src === cache.current) {
+    if (image.complete && image.naturalWidth > 0) {
+      image.classList.add('loaded');
+    }
+    return;
+  }
+
+  const nextUrl = cache.current || primary;
+  if (image.src !== nextUrl) {
+    image.src = nextUrl;
+  }
+
   image.onerror = () => {
-    if (!usedFallback) {
-      usedFallback = true;
+    if (image.src !== fallback) {
       image.src = fallback;
+      state.playerAvatarCache.set(player.key, { current: fallback });
       return;
     }
 
@@ -259,183 +359,38 @@ function configureAvatarImage(image, username, size = 64) {
     image.classList.add('loaded');
   };
 
-  if (image.complete && image.naturalWidth > 0) {
+  image.onload = () => {
+    state.playerAvatarCache.set(player.key, { current: image.src || primary });
     image.classList.add('loaded');
-  }
+  };
 }
 
-function normalizePlayerList(playerList) {
-  return Array.isArray(playerList)
-    ? playerList
-      .map((player) => {
-        const name = getPlayerRecordName(player);
-
-        if (!name) {
-          return null;
-        }
-
-        return {
-          name,
-          ping: getPlayerRecordPing(player),
-        };
-      })
-      .filter(Boolean)
-    : [];
-}
-
-function setPlayerHoverCardPlaceholder(message = 'Hover a player to see live details') {
-  if (elements.playerHoverCard) {
-    elements.playerHoverCard.classList.remove('is-active');
-    elements.playerHoverCard.dataset.player = '';
-  }
-
-  if (elements.playerHoverPlaceholder) {
-    elements.playerHoverPlaceholder.textContent = message;
-    elements.playerHoverPlaceholder.hidden = false;
-  }
-
-  if (elements.playerHoverContent) {
-    elements.playerHoverContent.hidden = true;
-  }
-}
-
-function syncPlayerPreviewStyles(playerName) {
-  if (!elements.playerList) {
-    return;
-  }
-
-  elements.playerList.querySelectorAll('.player-item').forEach((item) => {
-    item.classList.toggle('is-active', item.dataset.player === playerName);
-  });
-}
-
-function renderPlayerHoverCard(playerName) {
-  const record = state.playerRecords.find((player) => player.name === playerName);
-
-  if (!record) {
-    setPlayerHoverCardPlaceholder('Hover a player to see live details');
-    syncPlayerPreviewStyles('');
-    return;
-  }
-
-  const joinedAt = state.playerSessions.get(playerName) || Date.now();
-  const sessionText = formatSessionTime(joinedAt);
-  const pingText = record.ping > 0 ? `${Math.round(record.ping)} ms` : '—';
-
-  if (elements.playerHoverCard) {
-    elements.playerHoverCard.classList.add('is-active');
-    elements.playerHoverCard.dataset.player = playerName;
-  }
-
-  if (elements.playerHoverPlaceholder) {
-    elements.playerHoverPlaceholder.hidden = true;
-  }
-
-  if (elements.playerHoverContent) {
-    elements.playerHoverContent.hidden = false;
-  }
-
-  if (elements.playerHoverAvatar) {
-    configureAvatarImage(elements.playerHoverAvatar, playerName, 96);
-  }
-
-  if (elements.playerHoverName) {
-    elements.playerHoverName.textContent = playerName;
-  }
-
-  if (elements.playerHoverStatus) {
-    elements.playerHoverStatus.textContent = 'Online';
-  }
-
-  if (elements.playerHoverPing) {
-    elements.playerHoverPing.textContent = pingText;
-  }
-
-  if (elements.playerHoverSession) {
-    elements.playerHoverSession.textContent = sessionText;
-  }
-
-  syncPlayerPreviewStyles(playerName);
-}
-
-function setPlayerPreview(playerName, pinned = false) {
-  const normalizedName = String(playerName || '').trim();
-
-  if (!normalizedName) {
-    return;
-  }
-
-  state.playerPreviewName = normalizedName;
-
-  if (pinned) {
-    state.playerPinnedName = normalizedName;
-  }
-
-  renderPlayerHoverCard(normalizedName);
-}
-
-function clearPlayerPreview() {
-  state.playerPinnedName = '';
-  state.playerPreviewName = '';
-
-  if (state.playerRecords.length) {
-    setPlayerHoverCardPlaceholder('Hover a player to see live details');
-    syncPlayerPreviewStyles('');
-  } else {
-    setPlayerHoverCardPlaceholder('No players online');
-  }
-}
-
-function buildPlayerRecordSignature(players) {
-  return players.map((player) => `${player.name}:${player.ping}`).join('|');
-}
-
-function ensurePlayerSessions(players) {
-  const nextNames = new Set(players.map((player) => player.name));
-
-  Array.from(state.playerSessions.keys()).forEach((name) => {
-    if (!nextNames.has(name)) {
-      state.playerSessions.delete(name);
-    }
-  });
-
-  players.forEach((player) => {
-    if (!state.playerSessions.has(player.name)) {
-      state.playerSessions.set(player.name, Date.now());
-    }
-  });
-}
-
-function createPlayerItem(player) {
+function createPlayerNode(player) {
   const item = document.createElement('div');
-  item.className = 'player-item';
-  item.dataset.player = player.name;
+  item.className = 'player-item player-item--entering';
+  item.dataset.playerKey = player.key;
   item.tabIndex = 0;
-  item.setAttribute('role', 'button');
-  item.setAttribute('aria-label', `${player.name} profile`);
 
   const left = document.createElement('div');
   left.className = 'player-item__left';
-
-  const statusDot = document.createElement('span');
-  statusDot.className = 'player-status-dot';
-  statusDot.setAttribute('aria-hidden', 'true');
 
   const avatarShell = document.createElement('div');
   avatarShell.className = 'player-avatar-shell';
 
   const avatar = document.createElement('img');
   avatar.className = 'player-avatar';
-  avatar.alt = `${player.name} avatar`;
-  avatar.width = 38;
-  avatar.height = 38;
+  avatar.width = 40;
+  avatar.height = 40;
   avatar.loading = 'lazy';
   avatar.decoding = 'async';
   avatar.referrerPolicy = 'no-referrer';
-  configureAvatarImage(avatar, player.name, 64);
+  configureAvatarImage(avatar, player, 64);
+
+  const dot = document.createElement('span');
+  dot.className = 'player-status-dot';
 
   avatarShell.appendChild(avatar);
-  avatarShell.appendChild(statusDot);
+  avatarShell.appendChild(dot);
 
   const info = document.createElement('div');
   info.className = 'player-info';
@@ -444,13 +399,16 @@ function createPlayerItem(player) {
   name.className = 'player-name';
   name.textContent = player.name;
 
+  const meta = document.createElement('span');
+  meta.className = 'player-status';
+
   const session = document.createElement('span');
   session.className = 'player-session';
-  session.dataset.playerSessionName = player.name;
-  session.textContent = 'Online for 0s';
 
   info.appendChild(name);
+  info.appendChild(meta);
   info.appendChild(session);
+
   left.appendChild(avatarShell);
   left.appendChild(info);
 
@@ -459,57 +417,59 @@ function createPlayerItem(player) {
 
   const ping = document.createElement('span');
   ping.className = 'player-ping-badge';
-  ping.dataset.playerPingName = player.name;
-  ping.textContent = player.ping > 0 ? `${Math.round(player.ping)} ms` : 'Ping: —';
-
   right.appendChild(ping);
+
   item.appendChild(left);
   item.appendChild(right);
 
-  const activate = () => setPlayerPreview(player.name);
-  const pin = () => setPlayerPreview(player.name, true);
+  item.addEventListener('mouseenter', () => setHoveredPlayer(player.key));
+  item.addEventListener('focus', () => setHoveredPlayer(player.key));
+  item.addEventListener('click', () => setHoveredPlayer(player.key));
 
-  item.addEventListener('mouseenter', activate);
-  item.addEventListener('focus', activate);
-  item.addEventListener('click', pin);
-  item.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      pin();
-    }
-  });
-
+  updatePlayerNode(item, player);
+  window.setTimeout(() => item.classList.remove('player-item--entering'), 180);
   return item;
 }
 
-function updatePlayerItem(item, player) {
-  if (!item) {
+function updatePlayerNode(node, player) {
+  if (!node) {
     return;
   }
 
-  item.dataset.player = player.name;
+  node.dataset.playerKey = player.key;
+  node.classList.toggle('is-active', state.selectedPlayerKey === player.key);
 
-  const avatar = item.querySelector('.player-avatar');
-  if (avatar) {
-    avatar.alt = `${player.name} avatar`;
-    configureAvatarImage(avatar, player.name, 64);
+  const statusNode = node.querySelector('.player-status');
+  const sessionNode = node.querySelector('.player-session');
+  const pingNode = node.querySelector('.player-ping-badge');
+  const dotNode = node.querySelector('.player-status-dot');
+  const avatarNode = node.querySelector('.player-avatar');
+  const nameNode = node.querySelector('.player-name');
+
+  if (nameNode && nameNode.textContent !== player.name) {
+    nameNode.textContent = player.name;
   }
 
-  const name = item.querySelector('.player-name');
-  if (name) {
-    name.textContent = player.name;
+  if (statusNode) {
+    const statusText = player.status === 'offline' ? 'Offline' : player.isAFK ? 'AFK' : 'Online';
+    statusNode.textContent = statusText;
+    statusNode.dataset.state = player.status;
   }
 
-  const session = item.querySelector('.player-session');
-  if (session) {
-    session.dataset.playerSessionName = player.name;
-    session.textContent = formatSessionTime(state.playerSessions.get(player.name) || Date.now());
+  if (sessionNode) {
+    sessionNode.textContent = `Session: ${formatUptime(player.sessionTime)}`;
   }
 
-  const ping = item.querySelector('.player-ping-badge');
-  if (ping) {
-    ping.dataset.playerPingName = player.name;
-    ping.textContent = player.ping > 0 ? `${Math.round(player.ping)} ms` : 'Ping: —';
+  if (pingNode) {
+    pingNode.textContent = player.ping > 0 ? `Ping: ${Math.round(player.ping)} ms` : 'Ping: --';
+  }
+
+  if (dotNode) {
+    dotNode.dataset.state = player.status === 'offline' ? 'offline' : player.isAFK ? 'afk' : 'online';
+  }
+
+  if (avatarNode) {
+    configureAvatarImage(avatarNode, player, 64);
   }
 }
 
@@ -522,262 +482,222 @@ function renderEmptyPlayerState() {
   empty.className = 'empty-state empty-state--players';
   empty.textContent = 'No players online';
   elements.playerList.replaceChildren(empty);
-  setPlayerHoverCardPlaceholder('No players online');
+  state.playerNodeMap.clear();
+  state.selectedPlayerKey = '';
+  renderHoverCard(null);
 }
 
-function syncPlayerListDom(players) {
+function setHoveredPlayer(playerKey) {
+  state.selectedPlayerKey = playerKey;
+  const player = state.players.find((entry) => entry.key === playerKey) || null;
+  renderHoverCard(player);
+  state.playerNodeMap.forEach((node, key) => {
+    node.classList.toggle('is-active', key === playerKey);
+  });
+}
+
+function renderHoverCard(player) {
+  if (!elements.playerHoverCard || !elements.playerHoverPlaceholder || !elements.playerHoverContent) {
+    return;
+  }
+
+  if (!player) {
+    elements.playerHoverCard.classList.remove('is-active');
+    elements.playerHoverPlaceholder.hidden = false;
+    elements.playerHoverPlaceholder.textContent = state.players.length
+      ? 'Hover a player to see live details'
+      : 'No players online';
+    elements.playerHoverContent.hidden = true;
+    return;
+  }
+
+  elements.playerHoverCard.classList.add('is-active');
+  elements.playerHoverPlaceholder.hidden = true;
+  elements.playerHoverContent.hidden = false;
+
+  if (elements.playerHoverAvatar) {
+    configureAvatarImage(elements.playerHoverAvatar, player, 96);
+  }
+
+  if (elements.playerHoverName) {
+    elements.playerHoverName.textContent = player.name;
+  }
+
+  if (elements.playerHoverStatus) {
+    elements.playerHoverStatus.textContent = player.status === 'offline' ? 'Offline' : player.isAFK ? 'AFK' : 'Online';
+  }
+
+  if (elements.playerHoverPing) {
+    elements.playerHoverPing.textContent = player.ping > 0 ? `${Math.round(player.ping)} ms` : '--';
+  }
+
+  if (elements.playerHoverSession) {
+    elements.playerHoverSession.textContent = formatUptime(player.sessionTime);
+  }
+
+  if (elements.playerHoverTotal) {
+    elements.playerHoverTotal.textContent = formatUptime(player.totalPlaytime);
+  }
+
+  if (elements.playerHoverDaily) {
+    elements.playerHoverDaily.textContent = formatUptime(player.dailyPlaytime);
+  }
+
+  if (elements.playerHoverWeekly) {
+    elements.playerHoverWeekly.textContent = formatUptime(player.weeklyPlaytime);
+  }
+}
+
+function syncPlayerList(players) {
   if (!elements.playerList) {
     return;
   }
 
   if (!players.length) {
-    state.playerRecords = [];
-    previousPlayers = [];
-    state.playerSessions.clear();
     renderEmptyPlayerState();
     return;
   }
 
-  const listElement = elements.playerList;
-  const existingItems = new Map(
-    Array.from(listElement.querySelectorAll('.player-item')).map((item) => [item.dataset.player || '', item])
-  );
-  const nextNames = new Set(players.map((player) => player.name));
-
-  existingItems.forEach((item, name) => {
-    if (!nextNames.has(name)) {
-      item.remove();
+  const nextKeys = new Set(players.map((player) => player.key));
+  state.playerNodeMap.forEach((node, key) => {
+    if (!nextKeys.has(key)) {
+      node.classList.add('player-item--leaving');
+      window.setTimeout(() => node.remove(), 180);
+      state.playerNodeMap.delete(key);
+      state.playerStatsMap.delete(key);
     }
   });
-
-  const fragment = document.createDocumentFragment();
 
   players.forEach((player) => {
-    let item = existingItems.get(player.name);
+    let node = state.playerNodeMap.get(player.key);
 
-    if (!item) {
-      item = createPlayerItem(player);
-      item.classList.add('player-item--entering');
-      window.setTimeout(() => item.classList.remove('player-item--entering'), 180);
+    if (!node) {
+      node = createPlayerNode(player);
+      state.playerNodeMap.set(player.key, node);
     } else {
-      updatePlayerItem(item, player);
+      updatePlayerNode(node, player);
     }
 
-    fragment.appendChild(item);
+    elements.playerList.appendChild(node);
   });
 
-  listElement.appendChild(fragment);
+  if (!state.selectedPlayerKey || !players.some((player) => player.key === state.selectedPlayerKey)) {
+    state.selectedPlayerKey = players[0].key;
+  }
+
+  setHoveredPlayer(state.selectedPlayerKey);
 }
 
-function renderPlayerList(playerList) {
-  if (!elements.playerList) {
-    return;
-  }
+function schedulePlayerRender(players) {
+  state.pendingPlayerRender = players;
+  const elapsed = Date.now() - state.playerRenderAt;
+  const wait = elapsed >= PLAYER_RENDER_THROTTLE_MS ? 0 : PLAYER_RENDER_THROTTLE_MS - elapsed;
 
-  const players = normalizePlayerList(playerList);
-  const isSame = JSON.stringify(previousPlayers) === JSON.stringify(players);
+  window.setTimeout(() => {
+    if (!state.pendingPlayerRender) {
+      return;
+    }
 
-  state.playerRecords = players;
-  ensurePlayerSessions(players);
+    const nextPlayers = state.pendingPlayerRender;
+    state.pendingPlayerRender = null;
+    state.playerRenderAt = Date.now();
+    syncPlayerList(nextPlayers);
+  }, wait);
+}
 
-  if (!isSame) {
-    previousPlayers = [...players];
-    syncPlayerListDom(players);
-  }
-
+async function refreshPlayerStats(players) {
   if (!players.length) {
-    clearPlayerPreview();
     return;
   }
 
-  const currentPinnedExists = state.playerPinnedName && players.some((player) => player.name === state.playerPinnedName);
-  const currentPreviewExists = state.playerPreviewName && players.some((player) => player.name === state.playerPreviewName);
-  const preferredPreview = currentPinnedExists
-    ? state.playerPinnedName
-    : currentPreviewExists
-      ? state.playerPreviewName
-      : '';
+  await Promise.all(
+    players.map(async (player) => {
+      try {
+        const response = await fetch(`/api/player/${encodeURIComponent(player.key)}/stats`, {
+          method: 'GET',
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+        });
 
-  if (preferredPreview) {
-    renderPlayerHoverCard(preferredPreview);
-    return;
-  }
+        if (!response.ok) {
+          return;
+        }
 
-  state.playerPinnedName = '';
-  state.playerPreviewName = '';
-  setPlayerHoverCardPlaceholder('Hover a player to see live details');
-}
+        const payload = await response.json();
+        if (!payload || payload.success === false) {
+          return;
+        }
 
-function updatePlayerSessionTimes() {
-  if (!elements.playerList) {
-    return;
-  }
+        const stats = {
+          sessionTime: Math.max(0, Math.floor(normalizeNumber(payload.sessionTime, player.sessionTime))),
+          totalPlaytime: Math.max(0, Math.floor(normalizeNumber(payload.total, player.totalPlaytime))),
+          dailyPlaytime: Math.max(0, Math.floor(normalizeNumber(payload.daily, player.dailyPlaytime))),
+          weeklyPlaytime: Math.max(0, Math.floor(normalizeNumber(payload.weekly, player.weeklyPlaytime))),
+          isAFK: Boolean(payload.isAFK),
+          isOnline: Boolean(payload.isOnline),
+          fetchedAt: Date.now(),
+        };
 
-  const now = Date.now();
+        state.playerStatsMap.set(player.key, stats);
+      } catch (error) {
+        // Keep previous stats on network errors.
+      }
+    })
+  );
 
-  elements.playerList.querySelectorAll('.player-session').forEach((node) => {
-    const playerName = node.dataset.playerSessionName || '';
-    const joinedAt = state.playerSessions.get(playerName);
-
-    if (joinedAt) {
-      node.textContent = `Online for ${formatUptime((now - joinedAt) / 1000)}`;
-    }
+  state.players = state.players.map((player) => {
+    const extra = state.playerStatsMap.get(player.key);
+    return extra
+      ? {
+          ...player,
+          sessionTime: extra.sessionTime,
+          totalPlaytime: extra.totalPlaytime,
+          dailyPlaytime: extra.dailyPlaytime,
+          weeklyPlaytime: extra.weeklyPlaytime,
+          isAFK: extra.isAFK,
+        }
+      : player;
   });
 
-  if (state.playerPreviewName) {
-    const previewRecord = state.playerRecords.find((player) => player.name === state.playerPreviewName);
-    if (previewRecord) {
-      renderPlayerHoverCard(previewRecord.name);
+  schedulePlayerRender(state.players);
+}
+
+function tickPlayerCounters() {
+  if (!state.players.length) {
+    return;
+  }
+
+  let changed = false;
+
+  state.players = state.players.map((player) => {
+    const stats = state.playerStatsMap.get(player.key);
+    if (!stats || !stats.isOnline || stats.isAFK) {
+      return player;
     }
-  }
-}
 
-function startPlayerTicker() {
-  if (state.playerTicker) {
-    window.clearInterval(state.playerTicker);
-  }
+    changed = true;
+    stats.sessionTime += 1;
+    stats.totalPlaytime += 1;
+    stats.dailyPlaytime += 1;
+    stats.weeklyPlaytime += 1;
 
-  state.playerTicker = window.setInterval(updatePlayerSessionTimes, 1000);
-}
-
-function initChart() {
-  if (!window.Chart || !elements.chartCanvas) {
-    return null;
-  }
-
-  const palette = getChartPalette();
-  const context = elements.chartCanvas.getContext('2d');
-
-  state.chart = new Chart(context, {
-    type: 'line',
-    data: {
-      labels: chartState.labels,
-      datasets: [
-        {
-          label: 'CPU (%)',
-          data: chartState.cpuData,
-          yAxisID: 'y',
-          borderColor: palette.cpu,
-          backgroundColor: hexToRgba(palette.cpu, 0.12),
-          fill: true,
-          tension: 0.35,
-          borderWidth: 2,
-          pointRadius: 0,
-          pointHitRadius: 8,
-        },
-        {
-          label: 'RAM (MB)',
-          data: chartState.ramData,
-          yAxisID: 'y1',
-          borderColor: palette.ram,
-          backgroundColor: hexToRgba(palette.ram, 0.10),
-          fill: true,
-          tension: 0.35,
-          borderWidth: 2,
-          pointRadius: 0,
-          pointHitRadius: 8,
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: {
-        mode: 'index',
-        intersect: false,
-      },
-      plugins: {
-        legend: {
-          position: 'bottom',
-          labels: {
-            color: palette.ticks,
-            usePointStyle: true,
-            boxWidth: 10,
-            boxHeight: 10,
-            padding: 18,
-          },
-        },
-        tooltip: {
-          backgroundColor: palette.tooltipBg,
-          borderColor: palette.tooltipBorder,
-          borderWidth: 1,
-          titleColor: getCssVar('--text-primary') || '#E5E7EB',
-          bodyColor: getCssVar('--text-primary') || '#E5E7EB',
-          padding: 12,
-          displayColors: true,
-        },
-      },
-      scales: {
-        x: {
-          ticks: {
-            color: palette.ticks,
-            maxRotation: 0,
-            autoSkip: true,
-          },
-          grid: {
-            color: palette.grid,
-          },
-        },
-        y: {
-          beginAtZero: true,
-          suggestedMax: 100,
-          ticks: {
-            color: palette.ticks,
-          },
-          grid: {
-            color: palette.grid,
-          },
-        },
-        y1: {
-          beginAtZero: true,
-          position: 'right',
-          ticks: {
-            color: palette.ticks,
-          },
-          grid: {
-            drawOnChartArea: false,
-          },
-        },
-      },
-    },
+    return {
+      ...player,
+      sessionTime: stats.sessionTime,
+      totalPlaytime: stats.totalPlaytime,
+      dailyPlaytime: stats.dailyPlaytime,
+      weeklyPlaytime: stats.weeklyPlaytime,
+    };
   });
 
-  return state.chart;
-}
-
-function buildHistorySignature(history) {
-  return history.map((item) => `${item.lastUpdate}|${item.time}|${item.cpu}|${item.ram}|${item.uptime}|${item.players}`).join('~');
-}
-
-function applyHistoryToChart(history) {
-  if (!state.chart) {
-    return;
+  if (changed) {
+    schedulePlayerRender(state.players);
   }
-
-  const series = Array.isArray(history) ? history.slice(-state.maxPoints) : [];
-  const signature = buildHistorySignature(series);
-
-  if (signature === state.lastChartSignature) {
-    return;
-  }
-
-  state.lastChartSignature = signature;
-  chartState.labels = series.map((item) => item.time || '--');
-  chartState.cpuData = series.map((item) => normalizeNumber(item.cpu, 0));
-  chartState.ramData = series.map((item) => normalizeNumber(item.ram, 0));
-
-  state.chart.data.labels = [...chartState.labels];
-  state.chart.data.datasets[0].data = [...chartState.cpuData];
-  state.chart.data.datasets[1].data = [...chartState.ramData];
-  state.chart.update();
 }
 
 function renderLoading() {
   state.hasData = false;
-  setLoadingNodes(true);
   setConnectionState('loading', 'Connecting');
-  setChartOpacity(false);
-
   if (elements.apiMessage) {
     elements.apiMessage.textContent = 'Waiting for the first server payload...';
   }
@@ -792,49 +712,8 @@ function renderLoading() {
     elements.serverValue.dataset.state = 'loading';
   }
   if (elements.timeValue) elements.timeValue.textContent = '--';
-  renderPlayerList([]);
-}
-
-function unwrapApiPayload(payload) {
-  const root = payload && typeof payload === 'object' ? payload : {};
-  const data = root.data && typeof root.data === 'object' ? root.data : root;
-
-  if (data && typeof data === 'object' && ('latest' in data || Array.isArray(data.history))) {
-    return {
-      latest: data.latest && typeof data.latest === 'object' ? data.latest : null,
-      history: Array.isArray(data.history) ? data.history : [],
-    };
-  }
-
-  return {
-    latest: data && typeof data === 'object' ? data : null,
-    history: Array.isArray(root.history) ? root.history : [],
-  };
-}
-
-function renderSnapshotValues(snapshot) {
-  const players = Math.max(0, Math.floor(normalizeNumber(snapshot.players, 0)));
-  const cpu = Math.max(0, normalizeNumber(snapshot.cpu, 0));
-  const ram = Math.max(0, normalizeNumber(snapshot.ram, 0));
-  const ramUsed = Math.max(0, normalizeNumber(snapshot.ramUsed, ram / 1024));
-  const ramMax = Math.max(0, normalizeNumber(snapshot.ramMax, 0));
-  const status = String(snapshot.status || 'offline').toLowerCase() === 'online' ? 'Online' : 'Offline';
-  const ip = normalizeString(snapshot.ip, 'dxir.live');
-
-  if (elements.uptimeValue) elements.uptimeValue.textContent = formatUptime(snapshot.uptime);
-  if (elements.serverIpValue) elements.serverIpValue.textContent = ip;
-  if (elements.cpuValue) elements.cpuValue.textContent = `${cpu.toFixed(cpu % 1 === 0 ? 0 : 1)}%`;
-  if (elements.ramValue) {
-    elements.ramValue.textContent = `${ramUsed.toFixed(2)} / ${ramMax.toFixed(2)} GB`;
-  }
-  if (elements.playersValue) elements.playersValue.textContent = String(players);
-  if (elements.serverValue) {
-    elements.serverValue.textContent = status;
-    elements.serverValue.dataset.state = status.toLowerCase();
-  }
-  if (elements.timeValue) elements.timeValue.textContent = snapshot.time || '--';
-
-  return { players, cpu, ram, status, ip };
+  setChartOpacity(false);
+  renderEmptyPlayerState();
 }
 
 function markOffline() {
@@ -847,41 +726,83 @@ function markOffline() {
   }
 
   if (elements.apiMessage) {
-    elements.apiMessage.textContent = 'No recent data received';
+    const text = state.lastFreshAt > 0
+      ? `No recent data received. Last update ${formatSecondsAgo(state.lastFreshAt)}.`
+      : 'No recent data received';
+    elements.apiMessage.textContent = text;
   }
+}
+
+function renderSnapshot(snapshot) {
+  const cpu = Math.max(0, normalizeNumber(snapshot.cpu, 0));
+  const ramUsed = Math.max(0, normalizeNumber(snapshot.ramUsed, normalizeNumber(snapshot.ram, 0) / 1024));
+  const ramMax = Math.max(0, normalizeNumber(snapshot.ramMax, 0));
+  const players = Math.max(0, Math.floor(normalizeNumber(snapshot.players, 0)));
+  const status = String(snapshot.status || 'offline').toLowerCase() === 'online' ? 'online' : 'offline';
+
+  if (elements.uptimeValue) elements.uptimeValue.textContent = formatUptime(snapshot.uptime);
+  if (elements.serverIpValue) elements.serverIpValue.textContent = normalizeString(snapshot.ip, 'dxir.live');
+  if (elements.cpuValue) elements.cpuValue.textContent = `${cpu.toFixed(cpu % 1 === 0 ? 0 : 1)}%`;
+  if (elements.ramValue) elements.ramValue.textContent = `${ramUsed.toFixed(2)} / ${ramMax.toFixed(2)} GB`;
+  if (elements.playersValue) elements.playersValue.textContent = String(players);
+  if (elements.serverValue) {
+    elements.serverValue.textContent = status === 'online' ? 'Online' : 'Offline';
+    elements.serverValue.dataset.state = status;
+  }
+  if (elements.timeValue) elements.timeValue.textContent = snapshot.time || '--';
+
+  setConnectionState(status, status === 'online' ? 'Online' : 'Offline');
+  setChartOpacity(status !== 'online');
+
+  if (elements.apiMessage) {
+    elements.apiMessage.textContent = `Live data received. Last update ${formatSecondsAgo(snapshot.lastUpdate)}.`;
+  }
+
+  const playersFromApi = Array.isArray(snapshot.playerList) ? snapshot.playerList.map(normalizePlayer).filter(Boolean) : [];
+  state.players = playersFromApi;
+
+  state.players.forEach((player) => {
+    state.playerStatsMap.set(player.key, {
+      sessionTime: player.sessionTime,
+      totalPlaytime: player.totalPlaytime,
+      dailyPlaytime: player.dailyPlaytime,
+      weeklyPlaytime: player.weeklyPlaytime,
+      isAFK: player.isAFK,
+      isOnline: player.status === 'online',
+      fetchedAt: Date.now(),
+    });
+  });
+
+  schedulePlayerRender(state.players);
 }
 
 function renderData(payload) {
   const { latest, history } = unwrapApiPayload(payload);
-  const snapshot = latest || (Array.isArray(history) && history.length ? history[history.length - 1] : null);
+  const snapshot = latest && typeof latest === 'object' ? latest : null;
 
-  if (!snapshot || snapshot.ready === false || !Number.isFinite(Number(snapshot.lastUpdate)) || Number(snapshot.lastUpdate) <= 0) {
+  if (!snapshot || !Number.isFinite(Number(snapshot.lastUpdate)) || Number(snapshot.lastUpdate) <= 0) {
     if (!state.hasData) {
       renderLoading();
-    } else {
+    } else if (Date.now() - state.lastFreshAt > OFFLINE_THRESHOLD_MS) {
       markOffline();
     }
     return;
   }
 
-  if (snapshot.lastUpdate === state.lastSeenUpdate) {
-    markOffline();
+  const snapshotUpdate = Number(snapshot.lastUpdate);
+
+  if (snapshotUpdate === state.lastSeenUpdate) {
+    if (Date.now() - state.lastFreshAt > OFFLINE_THRESHOLD_MS) {
+      markOffline();
+    }
     return;
   }
 
   state.hasData = true;
-  state.lastSeenUpdate = snapshot.lastUpdate;
-  setLoadingNodes(false);
+  state.lastSeenUpdate = snapshotUpdate;
+  state.lastFreshAt = Date.now();
 
-  const { status } = renderSnapshotValues(snapshot);
-  setConnectionState(status.toLowerCase(), status);
-  setChartOpacity(false);
-
-  if (elements.apiMessage) {
-    elements.apiMessage.textContent = 'Live data received from API.';
-  }
-
-  renderPlayerList(snapshot.playerList);
+  renderSnapshot(snapshot);
   applyHistoryToChart(Array.isArray(history) && history.length ? history : [snapshot]);
 }
 
@@ -890,9 +811,7 @@ async function fetchStats() {
     const response = await fetch('/api/data', {
       method: 'GET',
       cache: 'no-store',
-      headers: {
-        Accept: 'application/json',
-      },
+      headers: { Accept: 'application/json' },
     });
 
     if (!response.ok) {
@@ -911,14 +830,17 @@ async function fetchStats() {
       return;
     }
 
-    markOffline();
+    if (Date.now() - state.lastFreshAt > OFFLINE_THRESHOLD_MS) {
+      markOffline();
+    }
   }
 }
 
 function startPolling() {
   fetchStats();
-  startPlayerTicker();
-  state.timer = window.setInterval(fetchStats, 2000);
+  state.pollTimer = window.setInterval(fetchStats, POLL_INTERVAL_MS);
+  state.playtimeFetchTimer = window.setInterval(() => refreshPlayerStats(state.players), PLAYTIME_REFRESH_MS);
+  state.playtimeTickTimer = window.setInterval(tickPlayerCounters, PLAYTIME_TICK_MS);
 }
 
 function bindEvents() {
@@ -930,31 +852,18 @@ function bindEvents() {
 
   document.addEventListener('click', (event) => {
     const target = event.target;
-
     if (elements.playerList?.contains(target) || elements.playerHoverCard?.contains(target)) {
       return;
     }
 
-    if (!state.playerPinnedName) {
-      return;
-    }
-
-    state.playerPinnedName = '';
-
-    if (state.playerPreviewName && state.playerRecords.some((player) => player.name === state.playerPreviewName)) {
-      renderPlayerHoverCard(state.playerPreviewName);
-    } else {
-      setPlayerHoverCardPlaceholder(state.playerRecords.length ? 'Hover a player to see live details' : 'No players online');
-    }
+    state.selectedPlayerKey = '';
+    renderHoverCard(null);
+    state.playerNodeMap.forEach((node) => node.classList.remove('is-active'));
   });
 }
 
-function bootstrapTheme() {
-  applyTheme(getThemeFromStorage(), false);
-}
-
 document.addEventListener('DOMContentLoaded', () => {
-  bootstrapTheme();
+  applyTheme(getThemeFromStorage(), false);
   bindEvents();
   initChart();
   renderLoading();

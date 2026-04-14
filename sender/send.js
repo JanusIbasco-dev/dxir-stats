@@ -144,6 +144,10 @@ function normalizePlayerName(player) {
   return String(player?.name || player?.username || player?.player || '').trim();
 }
 
+function normalizePlayerUuid(player) {
+  return String(player?.uuid || player?.id || player?.playerUuid || '').trim();
+}
+
 async function getMinecraftStatus() {
   try {
     const result = await minecraftStatus('127.0.0.1', 25565, {
@@ -158,7 +162,9 @@ async function getMinecraftStatus() {
       playerList: sample
         .map((player) => ({
           name: normalizePlayerName(player),
+          uuid: normalizePlayerUuid(player),
           ping: latency,
+          status: 'online',
         }))
         .filter((player) => player.name),
       status: 'online',

@@ -382,6 +382,11 @@ body::before {
   animation: player-enter 180ms ease both;
 }
 
+.player-item--leaving {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
 .player-item__left {
   display: flex;
   align-items: center;
@@ -418,6 +423,17 @@ body::before {
   border: 2px solid var(--bg-card);
   box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.45);
   animation: status-pulse 2s ease-in-out infinite;
+}
+
+.player-status-dot[data-state="afk"] {
+  background: #f59e0b;
+  box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4);
+}
+
+.player-status-dot[data-state="offline"] {
+  background: var(--danger);
+  box-shadow: none;
+  animation: none;
 }
 
 .player-status-dot--lg {
@@ -478,6 +494,21 @@ body::before {
   color: var(--text-secondary);
   font-size: 0.84rem;
   line-height: 1.2;
+}
+
+.player-status {
+  color: var(--text-secondary);
+  font-size: 0.83rem;
+  line-height: 1.2;
+  font-weight: 600;
+}
+
+.player-status[data-state="online"] {
+  color: #86efac;
+}
+
+.player-status[data-state="offline"] {
+  color: #fca5a5;
 }
 
 .player-hover-card {
@@ -637,6 +668,40 @@ body::before {
   border-color: rgba(239, 68, 68, 0.25);
   background: rgba(239, 68, 68, 0.10);
   color: #fecaca;
+}
+
+.leaderboard-toolbar {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.leaderboard-search-label {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.leaderboard-search {
+  width: min(340px, 100%);
+  border: 1px solid var(--border-color);
+  background: rgba(124, 58, 237, 0.06);
+  color: var(--text-primary);
+  border-radius: 10px;
+  height: 38px;
+  padding: 0 12px;
+  font: inherit;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.leaderboard-search:focus {
+  outline: none;
+  border-color: rgba(124, 58, 237, 0.45);
+  background: rgba(124, 58, 237, 0.1);
 }
 
 .leaderboard-grid {
@@ -839,6 +904,15 @@ body::before {
 
   .leaderboard-grid {
     grid-template-columns: 1fr;
+  }
+
+  .leaderboard-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .leaderboard-search {
+    width: 100%;
   }
 
   .leaderboard-card {

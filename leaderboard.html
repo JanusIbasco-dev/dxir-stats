@@ -57,6 +57,17 @@
 
       <section class="leaderboard-status card" id="leaderboardStatus">Loading leaderboard...</section>
 
+      <section class="leaderboard-toolbar card" aria-label="Leaderboard controls">
+        <label class="leaderboard-search-label" for="leaderboardSearch">Find player</label>
+        <input
+          id="leaderboardSearch"
+          class="leaderboard-search"
+          type="search"
+          placeholder="Search by username"
+          autocomplete="off"
+        />
+      </section>
+
       <section class="leaderboard-grid" aria-label="Minecraft leaderboard">
         <article class="card leaderboard-card" data-leaderboard-card="topKills">
           <div class="leaderboard-card__head">
@@ -100,6 +111,17 @@
             <span class="leaderboard-card__tag">Live</span>
           </div>
           <div class="leaderboard-list" id="earningsList"></div>
+        </article>
+
+        <article class="card leaderboard-card" data-leaderboard-card="playtime">
+          <div class="leaderboard-card__head">
+            <div>
+              <p class="stat-kicker">⏱️ Top Playtime</p>
+              <h2 class="stat-title">Most active players</h2>
+            </div>
+            <span class="leaderboard-card__tag">Live</span>
+          </div>
+          <div class="leaderboard-list" id="playtimeList"></div>
         </article>
       </section>
     </main>

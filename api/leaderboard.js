@@ -1,12 +1,14 @@
-const HISTORY_KEYS = ['topKills', 'richest', 'bounty', 'earnings'];
-const MAX_ENTRIES = 10;
+const { LEADERBOARD_LIMIT, normalizeLeaderboardItems, nowMs, readState, withState } = require('./_state');
 
-const leaderboardState = {
-  topKills: [],
-  richest: [],
-  bounty: [],
-  earnings: [],
+const API_TO_STORE_KEY = {
+  topKills: 'kills',
+  richest: 'balance',
+  bounty: 'bounty',
+  earnings: 'earnings',
+  playtime: 'playtime',
 };
+
+const HISTORY_KEYS = Object.keys(API_TO_STORE_KEY);
 
 function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -15,57 +17,47 @@ function setCorsHeaders(res) {
   res.setHeader('Cache-Control', 'no-store, max-age=0');
 }
 
-function normalizeName(value) {
-  return String(value || '').trim();
-}
-
-function normalizeValue(value) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-}
-
-function normalizeEntry(entry) {
-  if (!entry || typeof entry !== 'object') {
-    return null;
-  }
-
-  const name = normalizeName(entry.name || entry.player || entry.username);
-
-  if (!name) {
-    return null;
-  }
-
-  return {
-    name,
-    value: normalizeValue(entry.value ?? entry.score ?? entry.amount ?? entry.balance ?? entry.kills ?? entry.points),
-  };
-}
-
-function normalizeCategory(list) {
-  if (!Array.isArray(list)) {
-    return [];
-  }
-
-  return list
-    .map(normalizeEntry)
-    .filter(Boolean)
-    .sort((a, b) => b.value - a.value)
-    .slice(0, MAX_ENTRIES);
-}
-
-function cloneState() {
+function cloneState(source) {
   return HISTORY_KEYS.reduce((acc, key) => {
-    acc[key] = leaderboardState[key].map((entry) => ({ ...entry }));
+    const storeKey = API_TO_STORE_KEY[key];
+    const rows = source?.leaderboards?.[storeKey]?.items;
+    acc[key] = Array.isArray(rows) ? rows.map((entry) => ({ ...entry })) : [];
     return acc;
   }, {});
 }
 
-function mergePayload(body = {}) {
-  const nextState = cloneState();
+function extractRows(body, key) {
+  if (!body || typeof body !== 'object') {
+    return [];
+  }
+
+  const source = body[key];
+  if (Array.isArray(source)) {
+    return source;
+  }
+
+  if (source && typeof source === 'object') {
+    return source.items || source.data || source.entries || source.rows || [];
+  }
+
+  return [];
+}
+
+function toTimestampMap(source) {
+  return HISTORY_KEYS.reduce((acc, key) => {
+    const storeKey = API_TO_STORE_KEY[key];
+    acc[key] = Number(source?.leaderboards?.[storeKey]?.updatedAt || 0);
+    return acc;
+  }, {});
+}
+
+function mergePayload(body = {}, sourceState) {
+  const nextState = cloneState(sourceState);
 
   HISTORY_KEYS.forEach((key) => {
-    if (Array.isArray(body[key])) {
-      nextState[key] = normalizeCategory(body[key]);
+    const rows = extractRows(body, key);
+    if (rows.length) {
+      nextState[key] = normalizeLeaderboardItems(rows).slice(0, LEADERBOARD_LIMIT);
     }
   });
 
@@ -80,7 +72,11 @@ module.exports = async (req, res) => {
   }
 
   if (req.method === 'GET') {
-    return res.status(200).json(cloneState());
+    const state = await readState();
+    return res.status(200).json({
+      ...cloneState(state),
+      updatedAt: toTimestampMap(state),
+    });
   }
 
   if (req.method === 'POST') {
@@ -88,14 +84,36 @@ module.exports = async (req, res) => {
       const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
       const hasLeaderboardKeys = HISTORY_KEYS.some((key) => Object.prototype.hasOwnProperty.call(body, key));
 
-      if (hasLeaderboardKeys) {
-        const merged = mergePayload(body);
-        HISTORY_KEYS.forEach((key) => {
-          leaderboardState[key] = merged[key];
+      if (!hasLeaderboardKeys) {
+        const state = await readState();
+        return res.status(200).json({
+          ...cloneState(state),
+          updatedAt: toTimestampMap(state),
         });
       }
 
-      return res.status(200).json(cloneState());
+      const timestamp = nowMs();
+
+      const { state } = await withState((draft) => {
+        const merged = mergePayload(body, draft);
+
+        HISTORY_KEYS.forEach((key) => {
+          const storeKey = API_TO_STORE_KEY[key];
+          if (!Array.isArray(merged[key])) {
+            return;
+          }
+
+          draft.leaderboards[storeKey] = {
+            items: merged[key],
+            updatedAt: timestamp,
+          };
+        });
+      });
+
+      return res.status(200).json({
+        ...cloneState(state),
+        updatedAt: toTimestampMap(state),
+      });
     } catch (error) {
       return res.status(400).json({
         error: 'Invalid JSON payload',
