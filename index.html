@@ -30,61 +30,64 @@
         <div class="brand-block">
           <div class="brand-mark" aria-hidden="true">
             <span></span>
-          </div>
-          <div>
-            <p class="eyebrow">Server monitoring dashboard</p>
-            <h1>DXIR STATS</h1>
-            <p class="header-copy">Live CPU, RAM, player activity, and uptime for your Minecraft server.</p>
-          </div>
-        </div>
+                <div class="player-panel__list">
+                  <div class="player-list" id="playerList" aria-live="polite"></div>
+                </div>
 
-        <div class="header-actions">
-          <a class="theme-toggle leaderboard-link" href="/leaderboard" aria-label="Open leaderboard">
-            <span class="theme-toggle__icon" aria-hidden="true">🏆</span>
-            <span>Leaderboard</span>
-          </a>
+                <div class="player-panel__detail">
+                  <aside class="player-hover-card" id="playerHoverCard" aria-live="polite">
+                    <div class="player-hover-card__placeholder" id="playerHoverPlaceholder">
+                      Hover a player to see live details
+                    </div>
 
-          <div class="connection-pill" id="connectionStatus" data-state="loading">
-            <span class="connection-pill__dot"></span>
-            <span id="connectionLabel">Connecting</span>
-          </div>
+                    <div class="player-hover-card__content" id="playerHoverContent" hidden>
+                      <div class="player-hover-card__top">
+                        <div class="player-hover-avatar-shell">
+                          <img
+                            class="player-hover-avatar"
+                            id="playerHoverAvatar"
+                            alt=""
+                            loading="lazy"
+                            decoding="async"
+                          />
+                          <span class="player-status-dot player-status-dot--lg" aria-hidden="true"></span>
+                        </div>
 
-          <button class="theme-toggle" id="themeToggle" type="button" aria-pressed="false">
-            <span class="theme-toggle__icon" aria-hidden="true">☾</span>
-            <span id="themeToggleLabel">Light mode</span>
-          </button>
-        </div>
-      </section>
+                        <div class="player-hover-identity">
+                          <div class="player-hover-name" id="playerHoverName">—</div>
+                          <div class="player-hover-status" id="playerHoverStatus">Online</div>
+                        </div>
 
-      <section class="stats-grid" aria-label="Server statistics">
-        <article class="card stat-card stat-card--wide">
-          <div class="stat-card__head">
-            <div>
-              <p class="stat-kicker">Uptime</p>
-              <h2 class="stat-title">Server runtime</h2>
-            </div>
-            <span class="status-badge" id="serverValue">--</span>
-          </div>
-          <div class="stat-main stat-main--large" id="uptimeValue">--</div>
-          <div class="stat-meta">IP: <span id="serverIpValue">--</span></div>
-          <div class="stat-meta">Last updated: <span id="timeValue">--</span></div>
-          <div class="stat-footnote" id="apiMessage">Waiting for the first server update...</div>
-        </article>
 
+                      <div class="player-hover-meta-grid">
+                        <div class="player-hover-meta-block">
+                          <span>Ping</span>
+                          <strong id="playerHoverPing">—</strong>
+                        </div>
+
+                        <div class="player-hover-meta-block">
+                          <span>Session</span>
+                          <strong id="playerHoverSession">—</strong>
+                        </div>
+
+                        <div class="player-hover-meta-block">
+                          <span>Total</span>
+                          <strong id="playerHoverTotal">—</strong>
+                        </div>
+
+                        <div class="player-hover-meta-block">
+                          <span>Daily</span>
+                          <strong id="playerHoverDaily">—</strong>
+                        </div>
+
+                        <div class="player-hover-meta-block">
+                          <span>Weekly</span>
+                          <strong id="playerHoverWeekly">—</strong>
+                        </div>
+                      </div>
         <article class="card stat-card">
-          <div class="stat-card__head">
-            <div>
-              <p class="stat-kicker">CPU</p>
-              <h2 class="stat-title">Processor usage</h2>
-            </div>
-          </div>
-          <div class="stat-main" id="cpuValue">--</div>
-          <div class="stat-meta">Average load across all cores</div>
-        </article>
-
-        <article class="card stat-card">
-          <div class="stat-card__head">
-            <div>
+                  </aside>
+                </div>
               <p class="stat-kicker">RAM</p>
               <h2 class="stat-title">Java process memory</h2>
             </div>
