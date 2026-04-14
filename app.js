@@ -1,11 +1,16 @@
 const state = {
   hasData: false,
   timer: null,
+  ageTimer: null,
   chart: null,
   maxPoints: 50,
   lastHistorySignature: '',
+  lastAppliedUpdate: 0,
+  lastSnapshot: null,
   theme: 'dark',
 };
+
+const OFFLINE_THRESHOLD = 5000;
 
 const THEME_STORAGE_KEY = 'dxir-theme';
 
@@ -24,6 +29,7 @@ const elements = {
   apiMessage: document.getElementById('apiMessage'),
   playerList: document.getElementById('playerList'),
   chartCanvas: document.getElementById('usageChart'),
+  chartCard: document.getElementById('usageChart')?.closest('.chart-card'),
 };
 
 const chartState = {
@@ -40,6 +46,37 @@ function normalizeNumber(value, fallback = 0) {
 function normalizeString(value, fallback = '--') {
   const text = String(value || '').trim();
   return text || fallback;
+}
+
+function getSnapshotUpdate(snapshot) {
+  const timestamp = Number(snapshot?.lastUpdate || 0);
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : 0;
+}
+
+function isSnapshotFresh(snapshot, now = Date.now()) {
+  const lastUpdate = getSnapshotUpdate(snapshot);
+  return lastUpdate > 0 && now - lastUpdate <= OFFLINE_THRESHOLD;
+}
+
+function formatLastUpdated(lastUpdate, now = Date.now()) {
+  if (!lastUpdate) {
+    return 'Last updated: --';
+  }
+
+  const secondsAgo = Math.max(0, Math.floor((now - lastUpdate) / 1000));
+  return `Last updated: ${secondsAgo} seconds ago`;
+}
+
+function renderLastUpdated(lastUpdate) {
+  if (elements.timeValue) {
+    elements.timeValue.textContent = formatLastUpdated(lastUpdate);
+  }
+}
+
+function setChartOpacity(isOffline) {
+  if (elements.chartCard) {
+    elements.chartCard.style.opacity = isOffline ? '0.72' : '1';
+  }
 }
 
 function hexToRgba(hex, alpha) {
@@ -316,7 +353,7 @@ function initChart() {
 
 function buildHistorySignature(history) {
   return history
-    .map((item) => `${item.time}|${item.cpu}|${item.ram}|${item.uptime}|${item.players}`)
+    .map((item) => `${item.lastUpdate}|${item.time}|${item.cpu}|${item.ram}|${item.uptime}|${item.players}`)
     .join('~');
 }
 
@@ -347,6 +384,7 @@ function renderLoading() {
   state.hasData = false;
   setLoadingNodes(true);
   setConnectionState('loading', 'Connecting');
+  setChartOpacity(false);
   if (elements.apiMessage) {
     elements.apiMessage.textContent = 'Waiting for the first server payload...';
   }
@@ -383,14 +421,78 @@ function unwrapApiPayload(payload) {
 function renderData(payload) {
   const { latest, history } = unwrapApiPayload(payload);
   const snapshot = latest || (Array.isArray(history) && history.length ? history[history.length - 1] : null);
+  const lastUpdate = getSnapshotUpdate(snapshot);
 
   if (!snapshot || snapshot.ready === false) {
-    renderLoading();
-    applyHistoryToChart(Array.isArray(history) ? history : []);
+    if (!state.hasData) {
+      renderLoading();
+    } else {
+      setConnectionState('offline', 'Offline');
+      setChartOpacity(true);
+      renderLastUpdated(state.lastAppliedUpdate);
+      if (elements.apiMessage) {
+        elements.apiMessage.textContent = 'No recent data received';
+      }
+    }
+    return;
+  }
+
+  const isFresh = isSnapshotFresh(snapshot);
+
+  if (!isFresh) {
+    if (!state.hasData) {
+      state.hasData = true;
+      state.lastSnapshot = snapshot;
+      state.lastAppliedUpdate = lastUpdate || state.lastAppliedUpdate;
+
+      const serverState = String(snapshot.status || 'offline').toLowerCase() === 'online' ? 'online' : 'offline';
+      const players = Math.max(0, Math.floor(normalizeNumber(snapshot.players, 0)));
+      const cpu = Math.max(0, normalizeNumber(snapshot.cpu, 0));
+      const ram = Math.max(0, normalizeNumber(snapshot.ram, 0));
+      const ip = normalizeString(snapshot.ip, 'dxir.live');
+
+      setLoadingNodes(false);
+      setConnectionState('offline', 'Offline');
+      setChartOpacity(true);
+
+      if (elements.uptimeValue) elements.uptimeValue.textContent = formatUptime(snapshot.uptime);
+      if (elements.serverIpValue) elements.serverIpValue.textContent = ip;
+      if (elements.cpuValue) elements.cpuValue.textContent = `${cpu.toFixed(cpu % 1 === 0 ? 0 : 1)}%`;
+      if (elements.ramValue) elements.ramValue.textContent = `${Math.round(ram)} MB`;
+      if (elements.playersValue) elements.playersValue.textContent = String(players);
+      if (elements.serverValue) {
+        elements.serverValue.textContent = 'Offline';
+        elements.serverValue.dataset.state = 'offline';
+      }
+
+      renderLastUpdated(lastUpdate);
+      renderPlayerList(snapshot.playerList);
+      applyHistoryToChart(Array.isArray(history) ? history : [snapshot]);
+      if (elements.apiMessage) {
+        elements.apiMessage.textContent = 'No recent data received';
+      }
+    } else {
+      setConnectionState('offline', 'Offline');
+      setChartOpacity(true);
+      renderLastUpdated(state.lastAppliedUpdate);
+      if (elements.apiMessage) {
+        elements.apiMessage.textContent = 'No recent data received';
+      }
+    }
+
+    return;
+  }
+
+  if (lastUpdate && lastUpdate === state.lastAppliedUpdate && state.hasData) {
+    setConnectionState('online', 'Online');
+    setChartOpacity(false);
+    renderLastUpdated(lastUpdate);
     return;
   }
 
   state.hasData = true;
+  state.lastSnapshot = snapshot;
+  state.lastAppliedUpdate = lastUpdate;
   setLoadingNodes(false);
 
   const serverState = String(snapshot.status || 'offline').toLowerCase() === 'online' ? 'online' : 'offline';
@@ -411,13 +513,14 @@ function renderData(payload) {
     elements.serverValue.textContent = serverState === 'online' ? 'Online' : 'Offline';
     elements.serverValue.dataset.state = serverState;
   }
-  if (elements.timeValue) elements.timeValue.textContent = snapshot.time || '--';
   if (elements.apiMessage) {
-    elements.apiMessage.textContent = `History loaded: ${Array.isArray(history) ? history.length : 0} entries. Refreshing every 2 seconds.`;
+    elements.apiMessage.textContent = `History loaded: ${Array.isArray(history) ? history.length : 0} entries.`;
   }
 
+  renderLastUpdated(lastUpdate);
   renderPlayerList(snapshot.playerList);
   applyHistoryToChart(Array.isArray(history) ? history : [snapshot]);
+  setChartOpacity(false);
 }
 
 async function fetchStats() {
@@ -456,6 +559,21 @@ async function fetchStats() {
 function startPolling() {
   fetchStats();
   state.timer = window.setInterval(fetchStats, 2000);
+  state.ageTimer = window.setInterval(() => {
+    if (!state.lastAppliedUpdate) {
+      return;
+    }
+
+    renderLastUpdated(state.lastAppliedUpdate);
+
+    if (Date.now() - state.lastAppliedUpdate > OFFLINE_THRESHOLD) {
+      setConnectionState('offline', 'Offline');
+      setChartOpacity(true);
+      if (elements.apiMessage) {
+        elements.apiMessage.textContent = 'No recent data received';
+      }
+    }
+  }, 1000);
 }
 
 function bindEvents() {

@@ -9,6 +9,7 @@ const defaultSnapshot = {
   ip: 'dxir.live',
   status: 'offline',
   time: '--',
+  lastUpdate: 0,
   ready: false,
 };
 
@@ -72,8 +73,13 @@ function currentData() {
 }
 
 function storeSnapshot(snapshot) {
-  latestSnapshot = snapshot;
-  history = [...history, snapshot].slice(-HISTORY_LIMIT);
+  const stampedSnapshot = {
+    ...snapshot,
+    lastUpdate: Date.now(),
+  };
+
+  latestSnapshot = stampedSnapshot;
+  history = [...history, stampedSnapshot].slice(-HISTORY_LIMIT);
 }
 
 module.exports = async (req, res) => {
@@ -93,8 +99,7 @@ module.exports = async (req, res) => {
   if (req.method === 'POST') {
     try {
       const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
-      const snapshot = normalizePayload(body);
-      storeSnapshot(snapshot);
+      storeSnapshot(normalizePayload(body));
 
       return res.status(200).json({
         success: true,
