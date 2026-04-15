@@ -1,5 +1,6 @@
 const THEME_STORAGE_KEY = 'dxir-theme';
 const FALLBACK_REFRESH_MS = 15000;
+const AUTO_FETCH_MS = 2000;
 const MAX_POINTS = 200;
 const SMOOTH_SPEED = 5;
 const FLOW_POINTS_PER_SEC = 26;
@@ -26,6 +27,7 @@ const state = {
   dpr: 1,
   width: 0,
   height: 0,
+  autoFetchTimer: 0,
 };
 
 const elements = {
@@ -427,6 +429,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindEvents();
   initCanvas();
   fetchSnapshot();
+  state.autoFetchTimer = window.setInterval(fetchSnapshot, AUTO_FETCH_MS);
   connectRealtime();
   state.frameId = window.requestAnimationFrame(loop);
 });

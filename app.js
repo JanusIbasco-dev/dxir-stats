@@ -1,4 +1,5 @@
 const FALLBACK_REFRESH_MS = 15000;
+const AUTO_FETCH_MS = 2000;
 const OFFLINE_THRESHOLD_MS = 8000;
 const THEME_STORAGE_KEY = 'dxir-theme';
 
@@ -56,6 +57,7 @@ const state = {
   },
   chartLastUpdateKey: 0,
   playerTransitionTimers: new Map(),
+  autoFetchTimer: 0,
 };
 
 const elements = {
@@ -1385,6 +1387,7 @@ function startRealtime() {
   fetchStats();
   setupLeaderboardLazyLoad();
   connectRealtime();
+  state.autoFetchTimer = window.setInterval(fetchStats, AUTO_FETCH_MS);
   state.uiFrameId = window.requestAnimationFrame(uiAnimationLoop);
 }
 
