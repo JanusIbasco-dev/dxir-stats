@@ -1,31 +1,31 @@
 const THEME_STORAGE_KEY = 'dxir-theme';
 const FALLBACK_REFRESH_MS = 15000;
 const MAX_POINTS = 200;
-const SAMPLE_INTERVAL_MS = 90;
 const SMOOTH_SPEED = 5;
+const FLOW_POINTS_PER_SEC = 26;
+const GRID_LINES = 6;
 
 const state = {
-  chart: null,
-  labels: [],
-  cpuData: [],
-  ramData: [],
   isPaused: false,
   source: 'connecting',
   realtimeConnected: false,
   lastRealtimeAt: 0,
   lastFrameAt: 0,
-  lastSampleAt: 0,
   lastFallbackAt: 0,
-  chartRenderAt: 0,
   frameId: 0,
   targetCPU: 0,
   animatedCPU: 0,
   targetRam: 0,
   animatedRam: 0,
+  points: [],
+  pointAccumulator: 0,
   pusher: null,
   channel: null,
-  sampleAccumulatorMs: 0,
-  virtualPointTime: Date.now(),
+  canvas: null,
+  ctx: null,
+  dpr: 1,
+  width: 0,
+  height: 0,
 };
 
 const elements = {
@@ -102,118 +102,142 @@ function setLiveState(status, label) {
   }
 }
 
-function getCssVar(name) {
-  return getComputedStyle(document.body).getPropertyValue(name).trim();
+function getCssVar(name, fallback = '') {
+  const value = getComputedStyle(document.body).getPropertyValue(name).trim();
+  return value || fallback;
 }
 
-function initChart() {
-  if (!window.Chart || !elements.chartCanvas) {
+function initCanvas() {
+  if (!elements.chartCanvas) {
     return;
   }
 
-  state.chart = new Chart(elements.chartCanvas.getContext('2d'), {
-    type: 'line',
-    data: {
-      labels: state.labels,
-      datasets: [
-        {
-          label: 'CPU (%)',
-          data: state.cpuData,
-          borderColor: getCssVar('--chart-cpu') || '#7C3AED',
-          backgroundColor: 'rgba(124, 58, 237, 0.15)',
-          tension: 0.28,
-          borderWidth: 2,
-          pointRadius: 0,
-          fill: true,
-          hidden: false,
-          yAxisID: 'y',
-        },
-        {
-          label: 'RAM (GB)',
-          data: state.ramData,
-          borderColor: getCssVar('--chart-ram') || '#8B5CF6',
-          backgroundColor: 'rgba(139, 92, 246, 0.1)',
-          tension: 0.28,
-          borderWidth: 2,
-          pointRadius: 0,
-          fill: true,
-          hidden: false,
-          yAxisID: 'y1',
-        },
-      ],
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: {
-          position: 'bottom',
-          labels: {
-            color: getCssVar('--chart-ticks') || '#94A3B8',
-            usePointStyle: true,
-          },
-        },
-      },
-      scales: {
-        x: {
-          ticks: { color: getCssVar('--chart-ticks') || '#94A3B8', maxRotation: 0 },
-          grid: { color: getCssVar('--chart-grid') || 'rgba(148, 163, 184, 0.18)' },
-        },
-        y: {
-          beginAtZero: true,
-          suggestedMax: 100,
-          ticks: { color: getCssVar('--chart-ticks') || '#94A3B8' },
-          grid: { color: getCssVar('--chart-grid') || 'rgba(148, 163, 184, 0.18)' },
-        },
-        y1: {
-          beginAtZero: true,
-          position: 'right',
-          ticks: { color: getCssVar('--chart-ticks') || '#94A3B8' },
-          grid: { drawOnChartArea: false },
-        },
-      },
-    },
-  });
+  state.canvas = elements.chartCanvas;
+  state.ctx = state.canvas.getContext('2d');
+  resizeCanvas();
 }
 
-function pushPoint(now) {
-  const label = new Date(now).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
+function resizeCanvas() {
+  if (!state.canvas || !state.ctx) {
+    return;
+  }
+
+  const rect = state.canvas.getBoundingClientRect();
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const cssWidth = Math.max(1, Math.floor(rect.width));
+  const cssHeight = Math.max(1, Math.floor(rect.height));
+
+  state.dpr = dpr;
+  state.width = cssWidth;
+  state.height = cssHeight;
+
+  state.canvas.width = Math.floor(cssWidth * dpr);
+  state.canvas.height = Math.floor(cssHeight * dpr);
+  state.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function pushPoint() {
+  state.points.push({
+    cpu: state.animatedCPU,
+    ram: state.animatedRam,
   });
 
-  state.labels.push(label);
-  state.cpuData.push(state.animatedCPU);
-  state.ramData.push(state.animatedRam);
-
-  if (state.labels.length > MAX_POINTS) {
-    state.labels.shift();
-    state.cpuData.shift();
-    state.ramData.shift();
+  if (state.points.length > MAX_POINTS) {
+    state.points.shift();
   }
 }
 
-function renderChart(nowPerf) {
-  if (!state.chart) {
+function drawGrid(ctx, width, height) {
+  ctx.strokeStyle = getCssVar('--chart-grid', 'rgba(148, 163, 184, 0.18)');
+  ctx.lineWidth = 1;
+
+  for (let index = 0; index <= GRID_LINES; index += 1) {
+    const y = (height / GRID_LINES) * index;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+    ctx.stroke();
+  }
+
+  for (let index = 0; index <= GRID_LINES; index += 1) {
+    const x = (width / GRID_LINES) * index;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+    ctx.stroke();
+  }
+}
+
+function drawLine(ctx, values, color, width, height) {
+  if (values.length < 2) {
     return;
   }
 
-  if (nowPerf - state.chartRenderAt < 33) {
+  const stepX = width / Math.max(1, MAX_POINTS - 1);
+  const points = values.map((value, index) => {
+    const normalized = Math.max(0, Math.min(1, Number(value || 0) / 100));
+    return {
+      x: index * stepX,
+      y: height - normalized * height,
+    };
+  });
+
+  ctx.beginPath();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 2.25;
+  ctx.strokeStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 10;
+
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let index = 1; index < points.length - 1; index += 1) {
+    const current = points[index];
+    const next = points[index + 1];
+    const controlX = (current.x + next.x) / 2;
+    const controlY = (current.y + next.y) / 2;
+    ctx.quadraticCurveTo(current.x, current.y, controlX, controlY);
+  }
+
+  const last = points[points.length - 1];
+  ctx.lineTo(last.x, last.y);
+  ctx.stroke();
+
+  ctx.shadowBlur = 0;
+}
+
+function drawGraph() {
+  if (!state.ctx || !state.canvas) {
     return;
   }
 
-  state.chartRenderAt = nowPerf;
+  const ctx = state.ctx;
+  const width = state.width;
+  const height = state.height;
+
+  ctx.clearRect(0, 0, width, height);
+
+  // Faded overlay creates a soft trail effect for previous frames.
+  ctx.fillStyle = getCssVar('--bg-card', 'rgba(30, 41, 59, 0.6)');
+  ctx.globalAlpha = 0.18;
+  ctx.fillRect(0, 0, width, height);
+  ctx.globalAlpha = 1;
+
+  drawGrid(ctx, width, height);
 
   const cpuVisible = elements.toggleCpu ? elements.toggleCpu.checked : true;
   const ramVisible = elements.toggleRam ? elements.toggleRam.checked : true;
 
-  // Data arrays are already referenced by Chart.js; only visibility flags need toggling.
-  state.chart.data.datasets[0].hidden = !cpuVisible;
-  state.chart.data.datasets[1].hidden = !ramVisible;
-  state.chart.update('none');
+  const cpuColor = getCssVar('--chart-cpu', '#7C3AED');
+  const ramColor = getCssVar('--chart-ram', '#8B5CF6');
+
+  if (cpuVisible) {
+    drawLine(ctx, state.points.map((entry) => entry.cpu), cpuColor, width, height);
+  }
+
+  if (ramVisible) {
+    drawLine(ctx, state.points.map((entry) => entry.ram), ramColor, width, height);
+  }
 }
 
 function ingestSnapshot(snapshot, source = 'stream') {
@@ -225,7 +249,7 @@ function ingestSnapshot(snapshot, source = 'stream') {
   state.source = source;
 
   // Prevent a large visual jump on first payload.
-  if (!state.labels.length && state.animatedCPU === 0 && state.animatedRam === 0) {
+  if (!state.points.length && state.animatedCPU === 0 && state.animatedRam === 0) {
     state.animatedCPU = cpu;
     state.animatedRam = ramUsed;
   }
@@ -240,7 +264,8 @@ async function fetchSnapshot() {
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      setLiveState('offline', 'OFFLINE');
+      return;
     }
 
     const payload = await response.json();
@@ -279,7 +304,9 @@ async function connectRealtime() {
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      state.realtimeConnected = false;
+      setLiveState('error', 'FALLBACK');
+      return;
     }
 
     const config = await response.json();
@@ -321,17 +348,9 @@ async function connectRealtime() {
 }
 
 function clearGraph() {
-  state.labels = [];
-  state.cpuData = [];
-  state.ramData = [];
-  state.sampleAccumulatorMs = 0;
-  state.virtualPointTime = Date.now();
-  if (state.chart) {
-    state.chart.data.labels = [];
-    state.chart.data.datasets[0].data = [];
-    state.chart.data.datasets[1].data = [];
-    state.chart.update('none');
-  }
+  state.points = [];
+  state.pointAccumulator = 0;
+  drawGraph();
 }
 
 function loop(nowPerf) {
@@ -348,11 +367,11 @@ function loop(nowPerf) {
     state.animatedRam = lerp(state.animatedRam, state.targetRam, factor);
 
     // Continuously stream interpolated points so the graph never "waits" on backend updates.
-    state.sampleAccumulatorMs += deltaSeconds * 1000;
-    while (state.sampleAccumulatorMs >= SAMPLE_INTERVAL_MS) {
-      state.sampleAccumulatorMs -= SAMPLE_INTERVAL_MS;
-      state.virtualPointTime += SAMPLE_INTERVAL_MS;
-      pushPoint(state.virtualPointTime);
+    const sampleIntervalMs = 1000 / FLOW_POINTS_PER_SEC;
+    state.pointAccumulator += deltaSeconds * 1000;
+    while (state.pointAccumulator >= sampleIntervalMs) {
+      state.pointAccumulator -= sampleIntervalMs;
+      pushPoint();
     }
 
     state.lastSampleAt = nowPerf;
@@ -368,7 +387,7 @@ function loop(nowPerf) {
     elements.sourceText.textContent = `Source: ${state.source}`;
   }
 
-  renderChart(nowPerf);
+  drawGraph();
 
   if (nowPerf - state.lastFallbackAt >= FALLBACK_REFRESH_MS) {
     state.lastFallbackAt = nowPerf;
@@ -399,12 +418,14 @@ function bindEvents() {
   if (elements.clearGraphBtn) {
     elements.clearGraphBtn.addEventListener('click', clearGraph);
   }
+
+  window.addEventListener('resize', resizeCanvas);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   applyTheme(getThemeFromStorage(), false);
   bindEvents();
-  initChart();
+  initCanvas();
   fetchSnapshot();
   connectRealtime();
   state.frameId = window.requestAnimationFrame(loop);
