@@ -4,6 +4,7 @@ Production-ready Minecraft monitoring dashboard for Vercel with:
 
 - Live server stats (`/api/data`)
 - Stable player UI with UUID-first avatar caching + fallback
+- Avatar flow supports premium + cracked players (Mojang UUID -> Ely.by -> Minotar)
 - AFK-aware playtime tracking (session/total/daily/weekly)
 - Live leaderboard categories (`kills`, `balance`, `bounty`, `earnings`, `playtime`)
 - Realtime websocket updates (no frontend polling loops)
@@ -27,6 +28,7 @@ npm run send
 ## API endpoints
 
 - `GET/POST /api/data`
+- `GET /api/players`
 - `GET /api/player/{uuid-or-name}/playtime`
 - `GET/POST /api/player/{uuid-or-name}/activity`
 - `GET /api/player/{uuid-or-name}/stats`

@@ -44,7 +44,7 @@
   }
 
   function isMobile() {
-    return window.matchMedia('(max-width: 1023px)').matches;
+    return window.matchMedia('(max-width: 980px)').matches;
   }
 
   function initializeOpenState() {

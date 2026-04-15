@@ -1,12 +1,16 @@
 const CATEGORY_ORDER = ['topKills', 'richest', 'bounty', 'earnings', 'playtime'];
 const MAX_VISIBLE_ROWS = 10;
 const THEME_STORAGE_KEY = 'dxir-theme';
-const POLL_INTERVAL_MS = 10000;
+const FALLBACK_REFRESH_MS = 15000;
 
 const state = {
   theme: 'dark',
-  timer: null,
+  fallbackTimer: null,
   clock: null,
+  realtimeConnected: false,
+  lastRealtimeAt: 0,
+  pusher: null,
+  channel: null,
   lastUpdatedAt: 0,
   categories: {
     topKills: createCategoryState('/api/leaderboard/kills', 'kills'),
@@ -123,11 +127,21 @@ function setStatus(message, stateName = 'ready') {
 }
 
 function getAvatarUrl(entry) {
-  const source = String(entry?.uuid || entry?.username || '').trim();
+  const cached = String(entry?.avatarUrl || '').trim();
+  if (cached) {
+    return cached;
+  }
+
+  const source = String(entry?.uuid || '').trim();
   return source ? `https://mc-heads.net/avatar/${encodeURIComponent(source)}/64` : '';
 }
 
 function getAvatarFallbackUrl(entry) {
+  const source = String(entry?.username || '').trim();
+  return source ? `https://ely.by/avatar/${encodeURIComponent(source)}` : '';
+}
+
+function getAvatarLastFallbackUrl(entry) {
   const source = String(entry?.username || '').trim();
   return source ? `https://minotar.net/avatar/${encodeURIComponent(source)}/64` : '';
 }
@@ -140,8 +154,10 @@ function configureAvatar(image, entry) {
   const key = entry.key;
   const primary = getAvatarUrl(entry);
   const fallback = getAvatarFallbackUrl(entry);
+  const finalFallback = getAvatarLastFallbackUrl(entry);
   const cached = state.avatarCache.get(key) || {};
   let usedFallback = false;
+  let usedFinalFallback = false;
 
   image.classList.remove('loaded');
   image.dataset.avatarKey = key;
@@ -168,6 +184,13 @@ function configureAvatar(image, entry) {
       usedFallback = true;
       state.avatarCache.set(key, { current: fallback });
       image.src = fallback;
+      return;
+    }
+
+    if (!usedFinalFallback && finalFallback) {
+      usedFinalFallback = true;
+      state.avatarCache.set(key, { current: finalFallback });
+      image.src = finalFallback;
       return;
     }
 
@@ -198,6 +221,7 @@ function normalizeEntry(entry) {
     key: uuid || username.toLowerCase(),
     username,
     uuid,
+    avatarUrl: String(entry.avatarUrl || '').trim(),
     value: Number.isFinite(value) && value >= 0 ? value : 0,
   };
 }
@@ -517,6 +541,8 @@ function bindRealtimeEvents(channel) {
   };
 
   channel.bind('leaderboard_update', (event) => {
+    state.lastRealtimeAt = Date.now();
+    console.log('[DXIR RT] leaderboard_update', event?.category || 'unknown');
     const category = categoryMap[String(event?.category || '').toLowerCase()];
     if (!category) {
       return;
@@ -540,6 +566,8 @@ async function connectRealtime() {
 
     const config = await response.json();
     if (!config?.enabled || !window.Pusher) {
+      state.realtimeConnected = false;
+      setStatus('Realtime unavailable. Fallback refresh every 15s.', 'error');
       return;
     }
 
@@ -551,13 +579,33 @@ async function connectRealtime() {
     bindRealtimeEvents(state.channel);
 
     state.pusher.connection.bind('connected', () => {
+      state.realtimeConnected = true;
+      state.lastRealtimeAt = Date.now();
+      console.log('[DXIR RT] WebSocket connected');
       setStatus('Live leaderboard stream connected', 'ready');
+      refreshAll();
     });
 
     state.pusher.connection.bind('disconnected', () => {
+      state.realtimeConnected = false;
+      console.warn('[DXIR RT] WebSocket disconnected');
       setStatus('Realtime disconnected. Showing latest known rankings.', 'error');
+      refreshAll();
+    });
+
+    state.pusher.connection.bind('state_change', (event) => {
+      if (event?.current === 'connected' && event?.previous !== 'connected') {
+        console.log('[DXIR RT] WebSocket reconnected');
+      }
+    });
+
+    state.pusher.connection.bind('error', () => {
+      state.realtimeConnected = false;
+      console.warn('[DXIR RT] WebSocket error');
+      refreshAll();
     });
   } catch (error) {
+    state.realtimeConnected = false;
     setStatus('Unable to connect to realtime stream. Showing latest snapshot.', 'error');
   }
 }
@@ -573,6 +621,12 @@ function startRealtime() {
   renderInitialLoading();
   refreshAll();
   connectRealtime();
+  state.fallbackTimer = window.setInterval(() => {
+    const staleRealtime = Date.now() - state.lastRealtimeAt > FALLBACK_REFRESH_MS;
+    if (!state.realtimeConnected || staleRealtime) {
+      refreshAll();
+    }
+  }, FALLBACK_REFRESH_MS);
   state.clock = window.setInterval(updateStatusLine, 1000);
 }
 

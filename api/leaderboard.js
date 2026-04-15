@@ -35,7 +35,10 @@ function hydrateRows(sourceState, rows) {
     return {
       ...entry,
       uuid,
-      avatarUrl: buildAvatarUrl(uuid, 64),
+      avatarUrl:
+        (typeof entry?.avatarUrl === 'string' && entry.avatarUrl.trim())
+        || (typeof cached?.avatarUrl === 'string' && cached.avatarUrl.trim())
+        || buildAvatarUrl(uuid, 64),
     };
   });
 }

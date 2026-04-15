@@ -10,6 +10,8 @@ const {
   getCachedIdentity,
   setCachedIdentity,
   buildAvatarUrl,
+  buildCrackedAvatarUrl,
+  buildFallbackAvatarUrl,
   normalizeUuid,
   toFiniteNumber,
   withState,
@@ -17,6 +19,8 @@ const {
 const { publishRealtimeEvent } = require('./_realtime');
 
 const MOJANG_PROFILE_URL = 'https://api.mojang.com/users/profiles/minecraft/';
+const MOJANG_RETRY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const MOJANG_ERROR_BACKOFF_MS = 10 * 60 * 1000;
 const mojangRequestCache = new Map();
 
 const defaultSnapshot = {
@@ -68,14 +72,21 @@ async function resolveUuidFromMojang(username) {
       },
     });
 
+    if (response.status === 404 || response.status === 204) {
+      return { status: 'missing', uuid: '' };
+    }
+
     if (!response.ok) {
-      return '';
+      return { status: 'error', uuid: '' };
     }
 
     const payload = await response.json();
-    return normalizeUuid(payload?.id);
+    const uuid = normalizeUuid(payload?.id);
+    return uuid
+      ? { status: 'found', uuid }
+      : { status: 'missing', uuid: '' };
   })()
-    .catch(() => '')
+    .catch(() => ({ status: 'error', uuid: '' }))
     .finally(() => {
       mojangRequestCache.delete(key);
     });
@@ -85,7 +96,7 @@ async function resolveUuidFromMojang(username) {
   try {
     return await pending;
   } catch (error) {
-    return '';
+    return { status: 'error', uuid: '' };
   }
 }
 
@@ -159,20 +170,50 @@ async function resolvePlayersWithMojangUuid(players, sharedState) {
 
     const cachedIdentity = getCachedIdentity(sharedState, name);
     const cachedUuid = normalizeUuid(cachedIdentity?.uuid);
+    const now = nowMs();
 
     let mojangUuid = cachedUuid;
-    if (!mojangUuid) {
-      mojangUuid = await resolveUuidFromMojang(name);
-      if (mojangUuid) {
-        setCachedIdentity(sharedState, name, mojangUuid);
+    let cachedAvatar = String(cachedIdentity?.avatarUrl || '').trim();
+
+    const canRetryMojang = !cachedIdentity
+      || now >= Number(cachedIdentity.nextMojangRetryAt || 0)
+      || (!cachedUuid && String(cachedIdentity.mojangStatus || '') === 'unknown');
+
+    if (!mojangUuid && canRetryMojang) {
+      const mojangResult = await resolveUuidFromMojang(name);
+
+      if (mojangResult.status === 'found' && mojangResult.uuid) {
+        mojangUuid = mojangResult.uuid;
+        cachedAvatar = buildAvatarUrl(mojangUuid, 64);
+        setCachedIdentity(sharedState, name, {
+          uuid: mojangUuid,
+          avatarUrl: cachedAvatar,
+          mojangStatus: 'found',
+          mojangCheckedAt: now,
+          nextMojangRetryAt: 0,
+          updatedAt: now,
+        });
+      } else {
+        const fallbackAvatar = buildCrackedAvatarUrl(name) || buildFallbackAvatarUrl(name, 64);
+        cachedAvatar = fallbackAvatar;
+        setCachedIdentity(sharedState, name, {
+          uuid: '',
+          avatarUrl: fallbackAvatar,
+          mojangStatus: mojangResult.status,
+          mojangCheckedAt: now,
+          nextMojangRetryAt:
+            mojangResult.status === 'missing'
+              ? now + MOJANG_RETRY_COOLDOWN_MS
+              : now + MOJANG_ERROR_BACKOFF_MS,
+          updatedAt: now,
+        });
       }
     }
 
-    const fallbackUuid = normalizeUuid(player.uuid);
-    const finalUuid = mojangUuid || fallbackUuid;
+    const finalUuid = mojangUuid;
     const avatarUrl = finalUuid
       ? buildAvatarUrl(finalUuid, 64)
-      : (typeof cachedIdentity?.avatarUrl === 'string' ? cachedIdentity.avatarUrl : '');
+      : (cachedAvatar || buildCrackedAvatarUrl(name) || buildFallbackAvatarUrl(name, 64));
 
     // Debug mapping to verify live UUID source.
     console.log(`[DXIR UUID] ${name} => ${finalUuid || 'missing'}`);

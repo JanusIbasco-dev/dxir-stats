@@ -45,6 +45,9 @@ function getClient() {
 async function publishRealtimeEvent(eventName, payload) {
   const config = getRealtimeConfig();
   if (!config.enabled) {
+    if (process.env.DXIR_RT_DEBUG === '1') {
+      console.warn('[DXIR RT] Realtime disabled, skipped event:', eventName);
+    }
     return false;
   }
 
@@ -55,8 +58,12 @@ async function publishRealtimeEvent(eventName, payload) {
 
   try {
     await pusher.trigger(config.channel, eventName, payload || {});
+    if (process.env.DXIR_RT_DEBUG === '1') {
+      console.log('[DXIR RT] Emitted event:', eventName);
+    }
     return true;
   } catch (error) {
+    console.error('[DXIR RT] Failed to emit event:', eventName, error?.message || 'unknown');
     return false;
   }
 }

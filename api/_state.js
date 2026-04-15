@@ -82,6 +82,21 @@ function parseState(value) {
       safe.uuidDirectory[usernameKey] = {
         uuid,
         avatarUrl: uuid ? `https://mc-heads.net/avatar/${uuid}/64` : '',
+        mojangStatus: uuid ? 'found' : 'unknown',
+        mojangCheckedAt: 0,
+        nextMojangRetryAt: 0,
+        updatedAt: 0,
+      };
+      return;
+    }
+
+    if (!cached || typeof cached !== 'object') {
+      safe.uuidDirectory[usernameKey] = {
+        uuid: '',
+        avatarUrl: '',
+        mojangStatus: 'unknown',
+        mojangCheckedAt: 0,
+        nextMojangRetryAt: 0,
         updatedAt: 0,
       };
     }
@@ -109,6 +124,16 @@ function buildAvatarUrl(uuid, size = 64) {
   return compact ? `https://mc-heads.net/avatar/${compact}/${size}` : '';
 }
 
+function buildCrackedAvatarUrl(username) {
+  const clean = String(username || '').trim();
+  return clean ? `https://ely.by/avatar/${encodeURIComponent(clean)}` : '';
+}
+
+function buildFallbackAvatarUrl(username, size = 64) {
+  const clean = String(username || '').trim();
+  return clean ? `https://minotar.net/avatar/${encodeURIComponent(clean)}/${size}` : '';
+}
+
 function getCachedIdentity(state, username) {
   const key = normalizeUsernameKey(username);
   if (!key || !state || typeof state !== 'object') {
@@ -124,26 +149,37 @@ function getCachedIdentity(state, username) {
   }
 
   const uuid = normalizeUuid(cached.uuid);
+  const usernameText = String(username || '').trim();
   const avatarUrl = typeof cached.avatarUrl === 'string' && cached.avatarUrl.trim()
     ? cached.avatarUrl.trim()
-    : buildAvatarUrl(uuid, 64);
+    : (uuid ? buildAvatarUrl(uuid, 64) : buildCrackedAvatarUrl(usernameText));
 
   return {
     uuid,
     avatarUrl,
+    mojangStatus: String(cached.mojangStatus || 'unknown'),
+    mojangCheckedAt: toFiniteNumber(cached.mojangCheckedAt, 0),
+    nextMojangRetryAt: toFiniteNumber(cached.nextMojangRetryAt, 0),
     updatedAt: toFiniteNumber(cached.updatedAt, 0),
   };
 }
 
-function setCachedIdentity(state, username, uuid, updatedAt = nowMs()) {
+function setCachedIdentity(state, username, identityOrUuid, options = {}) {
   if (!state || typeof state !== 'object') {
     return null;
   }
 
   const key = normalizeUsernameKey(username);
-  const compactUuid = normalizeUuid(uuid);
+  const isObjectInput = identityOrUuid && typeof identityOrUuid === 'object';
+  const compactUuid = normalizeUuid(isObjectInput ? identityOrUuid.uuid : identityOrUuid);
+  const usernameText = String(username || '').trim();
+  const customAvatar = String(
+    isObjectInput
+      ? identityOrUuid.avatarUrl || options.avatarUrl || ''
+      : options.avatarUrl || ''
+  ).trim();
 
-  if (!key || !compactUuid) {
+  if (!key) {
     return null;
   }
 
@@ -155,13 +191,32 @@ function setCachedIdentity(state, username, uuid, updatedAt = nowMs()) {
     state.avatarDirectory = {};
   }
 
-  const avatarUrl = buildAvatarUrl(compactUuid, 64);
+  const avatarUrl = customAvatar
+    || (compactUuid ? buildAvatarUrl(compactUuid, 64) : buildCrackedAvatarUrl(usernameText) || buildFallbackAvatarUrl(usernameText, 64));
+  const updatedAt = toFiniteNumber(
+    isObjectInput ? identityOrUuid.updatedAt : options.updatedAt,
+    nowMs()
+  );
+
   state.uuidDirectory[key] = {
     uuid: compactUuid,
     avatarUrl,
-    updatedAt: toFiniteNumber(updatedAt, nowMs()),
+    mojangStatus: String(
+      (isObjectInput ? identityOrUuid.mojangStatus : options.mojangStatus) || (compactUuid ? 'found' : 'unknown')
+    ),
+    mojangCheckedAt: toFiniteNumber(
+      isObjectInput ? identityOrUuid.mojangCheckedAt : options.mojangCheckedAt,
+      0
+    ),
+    nextMojangRetryAt: toFiniteNumber(
+      isObjectInput ? identityOrUuid.nextMojangRetryAt : options.nextMojangRetryAt,
+      0
+    ),
+    updatedAt,
   };
-  state.avatarDirectory[compactUuid] = avatarUrl;
+  if (compactUuid) {
+    state.avatarDirectory[compactUuid] = avatarUrl;
+  }
 
   return {
     uuid: compactUuid,
@@ -403,6 +458,8 @@ module.exports = {
   normalizeUuid,
   normalizeUsernameKey,
   buildAvatarUrl,
+  buildCrackedAvatarUrl,
+  buildFallbackAvatarUrl,
   getCachedIdentity,
   setCachedIdentity,
 };

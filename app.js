@@ -1,13 +1,16 @@
-const POLL_INTERVAL_MS = 2000;
-const LEADERBOARD_INTERVAL_MS = 10000;
+const FALLBACK_REFRESH_MS = 15000;
 const OFFLINE_THRESHOLD_MS = 8000;
 const THEME_STORAGE_KEY = 'dxir-theme';
 
 const state = {
   hasData: false,
   theme: 'dark',
-  pollTimer: null,
-  leaderboardTimer: null,
+  fallbackTimer: null,
+  staleTimer: null,
+  realtimeConnected: false,
+  lastRealtimeAt: 0,
+  pusher: null,
+  realtimeChannel: null,
   chart: null,
   chartResizeTimer: null,
   maxPoints: 50,
@@ -364,6 +367,7 @@ function normalizePlayer(raw) {
     key,
     uuid,
     name,
+    avatarUrl: String(raw.avatarUrl || '').trim(),
     ping: Math.max(0, normalizeNumber(raw.ping, 0)),
     status: String(raw.status || 'online').toLowerCase() === 'offline' ? 'offline' : 'online',
     isAFK: Boolean(raw.isAFK),
@@ -374,19 +378,24 @@ function normalizePlayer(raw) {
   };
 }
 
-function configureAvatarImage(image, cacheMap, cacheKey, sourceId, fallbackName, size = 64) {
+function configureAvatarImage(image, cacheMap, cacheKey, sourceId, fallbackName, size = 64, cachedAvatarUrl = '') {
   if (!image || !cacheMap || !cacheKey) {
     return;
   }
 
-  const primary = sourceId
+  const primary = cachedAvatarUrl
+    ? String(cachedAvatarUrl).trim()
+    : sourceId
     ? `https://mc-heads.net/avatar/${encodeURIComponent(sourceId)}/${size}`
+    : '';
+  const crackedFallback = fallbackName
+    ? `https://ely.by/avatar/${encodeURIComponent(fallbackName)}`
     : '';
   const fallback = fallbackName
     ? `https://minotar.net/avatar/${encodeURIComponent(fallbackName)}/${size}`
     : '';
   const cached = cacheMap.get(cacheKey) || '';
-  const next = cached || primary || fallback;
+  const next = cached || primary || crackedFallback || fallback;
 
   if (!next) {
     return;
@@ -403,6 +412,12 @@ function configureAvatarImage(image, cacheMap, cacheKey, sourceId, fallbackName,
   };
 
   image.onerror = () => {
+    if (crackedFallback && image.src !== crackedFallback) {
+      cacheMap.set(cacheKey, crackedFallback);
+      image.src = crackedFallback;
+      return;
+    }
+
     if (fallback && image.src !== fallback) {
       cacheMap.set(cacheKey, fallback);
       image.src = fallback;
@@ -548,7 +563,8 @@ function updatePlayerCard(card, player) {
       `player:${player.key}`,
       player.uuid || player.name,
       player.name,
-      64
+      64,
+      player.avatarUrl
     );
   }
 }
@@ -592,6 +608,49 @@ function renderPlayers(players) {
   });
 
   elements.playerList.replaceChildren(fragment);
+}
+
+function syncPlayerCount() {
+  const onlineCount = state.players.filter((player) => String(player.status || '').toLowerCase() !== 'offline').length;
+  if (elements.playersValue) {
+    elements.playersValue.textContent = String(onlineCount);
+  }
+  if (elements.playersCountMirror) {
+    elements.playersCountMirror.textContent = String(onlineCount);
+  }
+}
+
+function upsertPlayerFromRealtime(payload) {
+  const normalized = normalizePlayer(payload);
+  if (!normalized) {
+    return;
+  }
+
+  const index = state.players.findIndex((player) => player.key === normalized.key);
+  if (index >= 0) {
+    state.players[index] = { ...state.players[index], ...normalized };
+  } else {
+    state.players.push(normalized);
+  }
+
+  renderPlayers(state.players);
+  syncPlayerCount();
+}
+
+function removePlayerFromRealtime(payload) {
+  const key = String(payload?.uuid || '').trim() || String(payload?.username || '').trim().toLowerCase();
+  if (!key) {
+    return;
+  }
+
+  const nextPlayers = state.players.filter((player) => player.key !== key);
+  if (nextPlayers.length === state.players.length) {
+    return;
+  }
+
+  state.players = nextPlayers;
+  renderPlayers(state.players);
+  syncPlayerCount();
 }
 
 function normalizeLeaderboardEntry(entry) {
@@ -678,7 +737,8 @@ function renderLeaderboardCategory(name, items, loading = false) {
       `leaderboard:${name}:${entry.key}`,
       entry.uuid || entry.username,
       entry.username,
-      48
+      48,
+      entry.avatarUrl
     );
 
     row.appendChild(rank);
@@ -906,6 +966,35 @@ async function fetchStats() {
   }
 }
 
+async function fetchPlayers() {
+  try {
+    const response = await fetch('/api/players', {
+      method: 'GET',
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const items = (Array.isArray(payload?.items) ? payload.items : [])
+      .map(normalizePlayer)
+      .filter(Boolean);
+
+    if (!items.length) {
+      return;
+    }
+
+    state.players = items;
+    renderPlayers(state.players);
+    syncPlayerCount();
+  } catch (error) {
+    // Best-effort fallback endpoint.
+  }
+}
+
 function checkStaleConnection() {
   if (!state.hasData) {
     return;
@@ -913,6 +1002,15 @@ function checkStaleConnection() {
 
   if (Date.now() - state.lastFreshAt > OFFLINE_THRESHOLD_MS) {
     markOffline();
+  }
+}
+
+function runFallbackRefresh() {
+  fetchStats();
+  fetchPlayers();
+
+  if (state.leaderboardsReady) {
+    fetchLeaderboards();
   }
 }
 
@@ -945,17 +1043,62 @@ function attachRealtimeBindings(channel) {
       return;
     }
 
+    state.lastRealtimeAt = Date.now();
+    console.log('[DXIR RT] stats_update');
+
     renderData({ data: { latest: event.latest, history: [] } }, 'realtime');
   });
 
   channel.bind('leaderboard_update', (event) => {
+    state.lastRealtimeAt = Date.now();
+    console.log('[DXIR RT] leaderboard_update', event?.category || 'unknown');
     applyRealtimeLeaderboardUpdate(event || {});
   });
 
-  channel.bind('player_join', () => {
-    if (elements.connectionStatus?.dataset.state !== 'online') {
-      setConnectionState('online', 'Online');
+  channel.bind('player_join', (event) => {
+    state.lastRealtimeAt = Date.now();
+    console.log('[DXIR RT] player_join', event?.username || event?.uuid || 'unknown');
+
+    upsertPlayerFromRealtime({
+      name: event?.username || event?.name,
+      uuid: event?.uuid,
+      avatarUrl: event?.avatarUrl,
+      ping: event?.ping,
+      status: 'online',
+      isAFK: Boolean(event?.isAFK),
+      sessionTime: event?.sessionTime,
+      totalPlaytime: event?.playtime,
+      dailyPlaytime: event?.dailyPlaytime,
+      weeklyPlaytime: event?.weeklyPlaytime,
+    });
+
+    if (state.realtimeConnected) {
+      setConnectionState('online', 'Live');
     }
+  });
+
+  channel.bind('player_update', (event) => {
+    state.lastRealtimeAt = Date.now();
+    console.log('[DXIR RT] player_update', event?.username || event?.uuid || 'unknown');
+
+    upsertPlayerFromRealtime({
+      name: event?.username || event?.name,
+      uuid: event?.uuid,
+      avatarUrl: event?.avatarUrl,
+      ping: event?.ping,
+      status: event?.status,
+      isAFK: Boolean(event?.isAFK),
+      sessionTime: event?.sessionTime,
+      totalPlaytime: event?.playtime,
+      dailyPlaytime: event?.dailyPlaytime,
+      weeklyPlaytime: event?.weeklyPlaytime,
+    });
+  });
+
+  channel.bind('player_leave', (event) => {
+    state.lastRealtimeAt = Date.now();
+    console.log('[DXIR RT] player_leave', event?.username || event?.uuid || 'unknown');
+    removePlayerFromRealtime(event || {});
   });
 }
 
@@ -974,8 +1117,9 @@ async function connectRealtime() {
     const config = await response.json();
     if (!config?.enabled || !window.Pusher) {
       if (elements.apiMessage) {
-        elements.apiMessage.textContent = 'Realtime is disabled. Showing latest snapshot only.';
+        elements.apiMessage.textContent = 'Realtime unavailable. Fallback refresh runs every 15s.';
       }
+      state.realtimeConnected = false;
       return;
     }
 
@@ -989,20 +1133,36 @@ async function connectRealtime() {
     attachRealtimeBindings(state.realtimeChannel);
 
     pusher.connection.bind('connected', () => {
+      state.realtimeConnected = true;
+      state.lastRealtimeAt = Date.now();
+      console.log('[DXIR RT] WebSocket connected');
       setConnectionState('online', 'Live');
       fetchStats();
     });
 
     pusher.connection.bind('disconnected', () => {
+      state.realtimeConnected = false;
+      console.warn('[DXIR RT] WebSocket disconnected');
       setConnectionState('offline', 'Disconnected');
+      runFallbackRefresh();
+    });
+
+    pusher.connection.bind('state_change', (event) => {
+      if (event?.current === 'connected' && event?.previous !== 'connected') {
+        console.log('[DXIR RT] WebSocket reconnected');
+      }
     });
 
     pusher.connection.bind('error', () => {
+      state.realtimeConnected = false;
+      console.warn('[DXIR RT] WebSocket error');
       setConnectionState('error', 'Realtime error');
+      runFallbackRefresh();
     });
   } catch (error) {
+    state.realtimeConnected = false;
     if (elements.apiMessage) {
-      elements.apiMessage.textContent = 'Unable to initialize realtime connection.';
+      elements.apiMessage.textContent = 'Unable to initialize realtime connection. Fallback refresh enabled.';
     }
   }
 }
@@ -1011,6 +1171,12 @@ function startRealtime() {
   fetchStats();
   setupLeaderboardLazyLoad();
   connectRealtime();
+  state.fallbackTimer = window.setInterval(() => {
+    const staleRealtime = Date.now() - state.lastRealtimeAt > FALLBACK_REFRESH_MS;
+    if (!state.realtimeConnected || staleRealtime) {
+      runFallbackRefresh();
+    }
+  }, FALLBACK_REFRESH_MS);
   state.staleTimer = window.setInterval(checkStaleConnection, 1000);
 }
 
