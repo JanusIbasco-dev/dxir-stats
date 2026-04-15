@@ -23,6 +23,7 @@
   --space-sm: 12px;
   --space-md: 16px;
   --space-lg: 20px;
+  --space-xl: 24px;
 }
 
 body.light {
@@ -53,6 +54,7 @@ body {
   font-family: Inter, "Segoe UI", system-ui, -apple-system, sans-serif;
   color: var(--text-primary);
   background:
+    radial-gradient(circle at 50% -10%, rgba(139, 92, 246, 0.14), transparent 42%),
     radial-gradient(circle at top right, rgba(139, 92, 246, 0.2), transparent 34%),
     radial-gradient(circle at top left, rgba(124, 58, 237, 0.16), transparent 28%),
     var(--bg-dark);
@@ -61,10 +63,10 @@ body {
 .app-layout {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-md);
   width: min(100vw - 12px, 1440px);
   margin: 0 auto;
-  padding: 10px 0 18px;
+  padding: var(--space-sm) 0 var(--space-lg);
   min-height: 100dvh;
 }
 
@@ -247,9 +249,9 @@ body.sidebar-open .sidebar-overlay {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 16px;
-  padding: 18px 20px;
-  margin-bottom: 20px;
+  gap: var(--space-md);
+  padding: var(--space-lg) var(--space-xl);
+  margin-bottom: var(--space-lg);
 }
 
 .brand-block {
@@ -318,13 +320,18 @@ body.sidebar-open .sidebar-overlay {
   font-weight: 600;
   cursor: pointer;
   text-decoration: none;
-  transition: transform 0.2s ease, border-color 0.2s ease, background-color 0.2s ease;
+  transition: transform 0.2s ease, border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .theme-toggle:hover {
   transform: translateY(-1px);
   border-color: rgba(139, 92, 246, 0.4);
   background: rgba(139, 92, 246, 0.14);
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.22);
+}
+
+:where(button, [role="button"], a, .sidebar-link, .leaderboard-row, .leaderboard-mini-row, .player-card) {
+  cursor: pointer;
 }
 
 .theme-toggle__icon {
@@ -993,10 +1000,17 @@ body.sidebar-open .sidebar-overlay {
 }
 
 .dashboard-leaderboards {
-  margin-top: 16px;
+  margin-top: var(--space-md);
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-md);
+}
+
+.dashboard-card,
+.leaderboard-mini-card,
+.leaderboard-card,
+.analytics-graph-card {
+  animation: panel-fade-in 0.28s ease;
 }
 
 /* Analytics page */
@@ -1432,6 +1446,17 @@ body.sidebar-open .sidebar-overlay {
   }
 }
 
+@keyframes panel-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes player-fade-in {
   from {
     opacity: 0;
@@ -1561,7 +1586,7 @@ body.sidebar-open .sidebar-overlay {
 
   .dashboard-grid {
     grid-template-columns: 1fr 1.5fr 1fr;
-    gap: 20px;
+    gap: var(--space-xl);
   }
 
   .chart-card {
