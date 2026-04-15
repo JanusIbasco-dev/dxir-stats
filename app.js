@@ -3,6 +3,7 @@ const AUTO_FETCH_MS = 2000;
 const OFFLINE_THRESHOLD_MS = 8000;
 const THEME_STORAGE_KEY = 'dxir-theme';
 const CHART_STREAM_MS = 120;
+const DEFAULT_AVATAR_DATA_URI = 'data:image/svg+xml;utf8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2264%22 height=%2264%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2212%22 fill=%22%231e293b%22/%3E%3Ccircle cx=%2232%22 cy=%2225%22 r=%2212%22 fill=%22%236b7280%22/%3E%3Cpath d=%22M12 56c2-10 10-16 20-16s18 6 20 16%22 fill=%22%236b7280%22/%3E%3C/svg%3E';
 
 const state = {
   hasData: false,
@@ -577,58 +578,117 @@ function normalizePlayer(raw) {
   };
 }
 
-function configureAvatarImage(image, cacheMap, cacheKey, sourceId, fallbackName, size = 64, cachedAvatarUrl = '') {
+function normalizeAvatarUuid(value) {
+  const compact = String(value || '').trim().toLowerCase().replace(/-/g, '');
+  return /^[0-9a-f]{32}$/.test(compact) ? compact : '';
+}
+
+function buildAvatarCandidates(uuid, username, size, cachedAvatarUrl, cachedResolvedUrl) {
+  const candidates = [];
+  const pushUnique = (value) => {
+    const next = String(value || '').trim();
+    if (!next || candidates.includes(next)) {
+      return;
+    }
+    candidates.push(next);
+  };
+
+  const compactUuid = normalizeAvatarUuid(uuid);
+  const safeUsername = String(username || '').trim();
+
+  // First honor already resolved cache to avoid avatar reload/flicker.
+  pushUnique(cachedResolvedUrl);
+
+  // Accept API-provided avatar only if it points to the supported providers.
+  const provided = String(cachedAvatarUrl || '').trim();
+  if (/^https:\/\/(mc-heads\.net|minotar\.net)\/avatar\//i.test(provided)) {
+    pushUnique(provided);
+  }
+
+  if (compactUuid) {
+    pushUnique(`https://mc-heads.net/avatar/${encodeURIComponent(compactUuid)}/${size}`);
+  }
+
+  if (safeUsername) {
+    pushUnique(`https://minotar.net/avatar/${encodeURIComponent(safeUsername)}/${size}`);
+  }
+
+  pushUnique(DEFAULT_AVATAR_DATA_URI);
+  return candidates;
+}
+
+function configureAvatarImage(image, cacheMap, cacheKey, uuid, username, size = 64, cachedAvatarUrl = '') {
   if (!image || !cacheMap || !cacheKey) {
     return;
   }
 
-  const primary = cachedAvatarUrl
-    ? String(cachedAvatarUrl).trim()
-    : sourceId
-    ? `https://mc-heads.net/avatar/${encodeURIComponent(sourceId)}/${size}`
-    : '';
-  const crackedFallback = fallbackName
-    ? `https://ely.by/avatar/${encodeURIComponent(fallbackName)}`
-    : '';
-  const fallback = fallbackName
-    ? `https://minotar.net/avatar/${encodeURIComponent(fallbackName)}/${size}`
-    : '';
-  const cached = cacheMap.get(cacheKey) || '';
-  const next = cached || primary || crackedFallback || fallback;
+  const cached = String(cacheMap.get(cacheKey) || '').trim();
+  const candidates = buildAvatarCandidates(uuid, username, size, cachedAvatarUrl, cached);
+  const next = candidates[0] || '';
 
   if (!next) {
     return;
   }
 
-  image.classList.remove('loaded');
-  if (image.src !== next) {
-    image.src = next;
+  // Skip re-binding/reloading when this element already resolved to the same URL.
+  if (image.dataset.avatarResolved === next && image.src === next) {
+    if (image.complete && image.naturalWidth > 0) {
+      image.classList.add('loaded');
+    }
+    return;
   }
 
+  image.classList.remove('loaded');
+
+  let candidateIndex = 0;
+  const loadCandidate = (index) => {
+    candidateIndex = index;
+    const candidate = candidates[index];
+    if (!candidate) {
+      image.onerror = null;
+      image.dataset.avatarResolved = DEFAULT_AVATAR_DATA_URI;
+      image.classList.add('loaded');
+      return;
+    }
+
+    if (image.src !== candidate) {
+      image.src = candidate;
+    }
+  };
+
   image.onload = () => {
-    cacheMap.set(cacheKey, image.src || next);
+    const resolved = image.src || candidates[candidateIndex] || next;
+    cacheMap.set(cacheKey, resolved);
+    image.dataset.avatarResolved = resolved;
+    console.debug('[DXIR Avatar]', {
+      username: String(username || '').trim(),
+      uuid: normalizeAvatarUuid(uuid),
+      finalAvatarUrl: resolved,
+    });
     image.classList.add('loaded');
   };
 
   image.onerror = () => {
-    if (crackedFallback && image.src !== crackedFallback) {
-      cacheMap.set(cacheKey, crackedFallback);
-      image.src = crackedFallback;
-      return;
-    }
-
-    if (fallback && image.src !== fallback) {
-      cacheMap.set(cacheKey, fallback);
-      image.src = fallback;
+    if (candidateIndex + 1 < candidates.length) {
+      loadCandidate(candidateIndex + 1);
       return;
     }
 
     image.onerror = null;
+    image.dataset.avatarResolved = DEFAULT_AVATAR_DATA_URI;
+    console.debug('[DXIR Avatar]', {
+      username: String(username || '').trim(),
+      uuid: normalizeAvatarUuid(uuid),
+      finalAvatarUrl: DEFAULT_AVATAR_DATA_URI,
+    });
     image.classList.add('loaded');
   };
 
+  loadCandidate(0);
+
   if (image.complete && image.naturalWidth > 0) {
     cacheMap.set(cacheKey, image.src || next);
+    image.dataset.avatarResolved = image.src || next;
     image.classList.add('loaded');
   }
 }
@@ -760,7 +820,7 @@ function updatePlayerCard(card, player) {
       avatar,
       state.playerAvatarCache,
       `player:${player.key}`,
-      player.uuid || player.name,
+      player.uuid,
       player.name,
       64,
       player.avatarUrl
@@ -966,7 +1026,7 @@ function renderLeaderboardCategory(name, items, loading = false) {
       avatar,
       state.leaderboardAvatarCache,
       `leaderboard:${name}:${entry.key}`,
-      entry.uuid || entry.username,
+      entry.uuid,
       entry.username,
       48,
       entry.avatarUrl
