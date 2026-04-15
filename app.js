@@ -30,6 +30,32 @@ const state = {
     bounty: { signature: '' },
     earnings: { signature: '' },
   },
+  uiFrameId: 0,
+  lastUiFrameAt: 0,
+  lastStaleCheckAt: 0,
+  lastFallbackCheckAt: 0,
+  lastChartAnimateAt: 0,
+  targetStats: {
+    cpu: 0,
+    ramUsed: 0,
+    ramMax: 0,
+    players: 0,
+    uptime: 0,
+    uptimeReceivedPerf: 0,
+  },
+  animatedStats: {
+    cpu: 0,
+    ramUsed: 0,
+    ramMax: 0,
+    players: 0,
+  },
+  currentSnapshot: null,
+  chartTargetPoint: {
+    cpu: 0,
+    ram: 0,
+  },
+  chartLastUpdateKey: 0,
+  playerTransitionTimers: new Map(),
 };
 
 const elements = {
@@ -99,6 +125,15 @@ function formatElapsed(ms) {
 
 function formatNumber(value) {
   return new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }).format(Number(value || 0));
+}
+
+function lerp(current, target, factor) {
+  return current + (target - current) * factor;
+}
+
+function formatStatNumber(value, digits = 1) {
+  const amount = Number(value || 0);
+  return amount.toFixed(digits);
 }
 
 function getThemeFromStorage() {
@@ -331,6 +366,62 @@ function applyHistoryToChart(history) {
   state.chart.data.datasets[0].data = [...chartState.cpuData];
   state.chart.data.datasets[1].data = [...chartState.ramData];
   state.chart.update();
+
+  if (chartState.cpuData.length) {
+    state.chartTargetPoint.cpu = Number(chartState.cpuData[chartState.cpuData.length - 1] || 0);
+    state.chartTargetPoint.ram = Number(chartState.ramData[chartState.ramData.length - 1] || 0);
+  }
+}
+
+function appendSnapshotToChart(snapshot) {
+  if (!state.chart || !snapshot) {
+    return;
+  }
+
+  const updateKey = Number(snapshot.lastUpdate || 0);
+  if (updateKey > 0 && updateKey === state.chartLastUpdateKey) {
+    return;
+  }
+
+  state.chartLastUpdateKey = updateKey;
+
+  chartState.labels.push(normalizeString(snapshot.time, '--'));
+  chartState.cpuData.push(normalizeNumber(snapshot.cpu, 0));
+  chartState.ramData.push(normalizeNumber(snapshot.ram, 0));
+
+  if (chartState.labels.length > state.maxPoints) {
+    chartState.labels.shift();
+    chartState.cpuData.shift();
+    chartState.ramData.shift();
+  }
+
+  state.chartTargetPoint.cpu = Number(chartState.cpuData[chartState.cpuData.length - 1] || 0);
+  state.chartTargetPoint.ram = Number(chartState.ramData[chartState.ramData.length - 1] || 0);
+
+  state.chart.data.labels = [...chartState.labels];
+  state.chart.data.datasets[0].data = [...chartState.cpuData];
+  state.chart.data.datasets[1].data = [...chartState.ramData];
+  state.chart.update('none');
+}
+
+function animateChartTowardsTarget(nowPerf) {
+  if (!state.chart || chartState.cpuData.length === 0) {
+    return;
+  }
+
+  if (nowPerf - state.lastChartAnimateAt < 48) {
+    return;
+  }
+
+  state.lastChartAnimateAt = nowPerf;
+
+  const lastIndex = chartState.cpuData.length - 1;
+  chartState.cpuData[lastIndex] = lerp(chartState.cpuData[lastIndex], state.chartTargetPoint.cpu, 0.18);
+  chartState.ramData[lastIndex] = lerp(chartState.ramData[lastIndex], state.chartTargetPoint.ram, 0.18);
+
+  state.chart.data.datasets[0].data[lastIndex] = chartState.cpuData[lastIndex];
+  state.chart.data.datasets[1].data[lastIndex] = chartState.ramData[lastIndex];
+  state.chart.update('none');
 }
 
 function unwrapApiPayload(payload) {
@@ -375,6 +466,7 @@ function normalizePlayer(raw) {
     totalPlaytime: Math.max(0, Math.floor(normalizeNumber(raw.totalPlaytime, 0))),
     dailyPlaytime: Math.max(0, Math.floor(normalizeNumber(raw.dailyPlaytime, 0))),
     weeklyPlaytime: Math.max(0, Math.floor(normalizeNumber(raw.weeklyPlaytime, 0))),
+    counterUpdatedPerf: performance.now(),
   };
 }
 
@@ -569,6 +661,37 @@ function updatePlayerCard(card, player) {
   }
 }
 
+function getLivePlayerCounters(player, nowPerf) {
+  const isActive = String(player.status || '').toLowerCase() === 'online' && !player.isAFK;
+  const elapsed = isActive
+    ? Math.max(0, (nowPerf - Number(player.counterUpdatedPerf || nowPerf)) / 1000)
+    : 0;
+
+  return {
+    session: Number(player.sessionTime || 0) + elapsed,
+    total: Number(player.totalPlaytime || 0) + elapsed,
+    daily: Number(player.dailyPlaytime || 0) + elapsed,
+    weekly: Number(player.weeklyPlaytime || 0) + elapsed,
+  };
+}
+
+function animatePlayerCounters(nowPerf) {
+  state.players.forEach((player) => {
+    const card = state.playerNodeMap.get(player.key);
+    if (!card) {
+      return;
+    }
+
+    const counters = getLivePlayerCounters(player, nowPerf);
+    const pills = card.querySelectorAll('.meta-pill');
+
+    if (pills[1]) pills[1].textContent = `Session: ${formatUptime(counters.session)}`;
+    if (pills[2]) pills[2].textContent = `Total: ${formatUptime(counters.total)}`;
+    if (pills[3]) pills[3].textContent = `Daily: ${formatUptime(counters.daily)}`;
+    if (pills[4]) pills[4].textContent = `Weekly: ${formatUptime(counters.weekly)}`;
+  });
+}
+
 function renderPlayers(players) {
   if (!elements.playerList) {
     return;
@@ -589,7 +712,11 @@ function renderPlayers(players) {
 
   existing.forEach((node, key) => {
     if (!nextKeys.has(key)) {
-      node.remove();
+      node.classList.add('player-card--leaving');
+      const timer = window.setTimeout(() => {
+        node.remove();
+      }, 180);
+      state.playerTransitionTimers.set(key, timer);
       existing.delete(key);
       state.expandedPlayers.delete(key);
     }
@@ -600,6 +727,8 @@ function renderPlayers(players) {
     let node = existing.get(player.key);
     if (!node) {
       node = createPlayerCard(player);
+      node.classList.add('player-card--entering');
+      window.setTimeout(() => node.classList.remove('player-card--entering'), 180);
       existing.set(player.key, node);
     } else {
       updatePlayerCard(node, player);
@@ -612,12 +741,7 @@ function renderPlayers(players) {
 
 function syncPlayerCount() {
   const onlineCount = state.players.filter((player) => String(player.status || '').toLowerCase() !== 'offline').length;
-  if (elements.playersValue) {
-    elements.playersValue.textContent = String(onlineCount);
-  }
-  if (elements.playersCountMirror) {
-    elements.playersCountMirror.textContent = String(onlineCount);
-  }
+  state.targetStats.players = onlineCount;
 }
 
 function upsertPlayerFromRealtime(payload) {
@@ -839,6 +963,8 @@ function setupLeaderboardLazyLoad() {
 
 function renderLoading() {
   state.hasData = false;
+  state.currentSnapshot = null;
+  state.targetStats.uptimeReceivedPerf = performance.now();
   setConnectionState('loading', 'Connecting');
   setChartOpacity(false);
 
@@ -859,6 +985,10 @@ function renderLoading() {
 }
 
 function markOffline() {
+  if (state.currentSnapshot) {
+    state.currentSnapshot.status = 'offline';
+  }
+
   setConnectionState('offline', 'Offline');
   setChartOpacity(true);
 
@@ -873,19 +1003,72 @@ function markOffline() {
   }
 }
 
-function renderSnapshot(snapshot) {
-  const players = Math.max(0, Math.floor(normalizeNumber(snapshot.players, 0)));
+function applySnapshotTargets(snapshot) {
   const cpu = Math.max(0, normalizeNumber(snapshot.cpu, 0));
   const ramUsed = Math.max(0, normalizeNumber(snapshot.ramUsed, normalizeNumber(snapshot.ram, 0) / 1024));
   const ramMax = Math.max(0, normalizeNumber(snapshot.ramMax, 0));
+  const players = Math.max(0, Math.floor(normalizeNumber(snapshot.players, 0)));
+  const uptime = Math.max(0, Math.floor(normalizeNumber(snapshot.uptime, 0)));
+
+  state.targetStats.cpu = cpu;
+  state.targetStats.ramUsed = ramUsed;
+  state.targetStats.ramMax = ramMax;
+  state.targetStats.players = players;
+  state.targetStats.uptime = uptime;
+  state.targetStats.uptimeReceivedPerf = performance.now();
+
+  if (!state.currentSnapshot) {
+    state.animatedStats.cpu = cpu;
+    state.animatedStats.ramUsed = ramUsed;
+    state.animatedStats.ramMax = ramMax;
+    state.animatedStats.players = players;
+  }
+}
+
+function renderAnimatedStats(nowPerf) {
+  if (!state.currentSnapshot) {
+    return;
+  }
+
+  state.animatedStats.cpu = lerp(state.animatedStats.cpu, state.targetStats.cpu, 0.12);
+  state.animatedStats.ramUsed = lerp(state.animatedStats.ramUsed, state.targetStats.ramUsed, 0.12);
+  state.animatedStats.ramMax = lerp(state.animatedStats.ramMax, state.targetStats.ramMax, 0.08);
+  state.animatedStats.players = lerp(state.animatedStats.players, state.targetStats.players, 0.12);
+
+  const activeUptime = state.currentSnapshot.status === 'online' && state.hasData;
+  const uptimeSeconds = activeUptime
+    ? state.targetStats.uptime + Math.max(0, (nowPerf - state.targetStats.uptimeReceivedPerf) / 1000)
+    : state.targetStats.uptime;
+
+  if (elements.uptimeValue) {
+    elements.uptimeValue.textContent = formatUptime(uptimeSeconds);
+  }
+  if (elements.cpuValue) {
+    elements.cpuValue.textContent = `${formatStatNumber(state.animatedStats.cpu, 1)}%`;
+  }
+  if (elements.ramValue) {
+    elements.ramValue.textContent = `${formatStatNumber(state.animatedStats.ramUsed, 2)} / ${formatStatNumber(state.animatedStats.ramMax, 2)} GB`;
+  }
+
+  const playerCount = Math.max(0, Math.round(state.animatedStats.players));
+  if (elements.playersValue) {
+    elements.playersValue.textContent = String(playerCount);
+  }
+  if (elements.playersCountMirror) {
+    elements.playersCountMirror.textContent = String(playerCount);
+  }
+}
+
+function renderSnapshot(snapshot) {
   const status = String(snapshot.status || 'offline').toLowerCase() === 'online' ? 'Online' : 'Offline';
 
-  if (elements.uptimeValue) elements.uptimeValue.textContent = formatUptime(snapshot.uptime);
+  applySnapshotTargets(snapshot);
+  state.currentSnapshot = {
+    ...snapshot,
+    status: status.toLowerCase(),
+  };
+
   if (elements.serverIpValue) elements.serverIpValue.textContent = normalizeString(snapshot.ip, 'dxir.live');
-  if (elements.cpuValue) elements.cpuValue.textContent = `${cpu.toFixed(cpu % 1 === 0 ? 0 : 1)}%`;
-  if (elements.ramValue) elements.ramValue.textContent = `${ramUsed.toFixed(2)} / ${ramMax.toFixed(2)} GB`;
-  if (elements.playersValue) elements.playersValue.textContent = String(players);
-  if (elements.playersCountMirror) elements.playersCountMirror.textContent = String(players);
 
   if (elements.serverValue) {
     elements.serverValue.textContent = status;
@@ -905,9 +1088,10 @@ function renderSnapshot(snapshot) {
     : [];
 
   renderPlayers(state.players);
+  syncPlayerCount();
 }
 
-function renderData(payload) {
+function renderData(payload, source = 'api') {
   const { latest, history } = unwrapApiPayload(payload);
   const snapshot = latest || (history.length ? history[history.length - 1] : null);
 
@@ -933,7 +1117,16 @@ function renderData(payload) {
   state.lastFreshAt = Date.now();
 
   renderSnapshot(snapshot);
-  applyHistoryToChart(history.length ? history : [snapshot]);
+
+  if (history.length) {
+    applyHistoryToChart(history);
+  } else {
+    appendSnapshotToChart(snapshot);
+  }
+
+  if (elements.apiMessage && source === 'realtime') {
+    elements.apiMessage.textContent = 'Live stream update received just now.';
+  }
 }
 
 async function fetchStats() {
@@ -982,10 +1175,6 @@ async function fetchPlayers() {
     const items = (Array.isArray(payload?.items) ? payload.items : [])
       .map(normalizePlayer)
       .filter(Boolean);
-
-    if (!items.length) {
-      return;
-    }
 
     state.players = items;
     renderPlayers(state.players);
@@ -1167,17 +1356,36 @@ async function connectRealtime() {
   }
 }
 
-function startRealtime() {
-  fetchStats();
-  setupLeaderboardLazyLoad();
-  connectRealtime();
-  state.fallbackTimer = window.setInterval(() => {
+function uiAnimationLoop(nowPerf) {
+  if (!state.lastUiFrameAt) {
+    state.lastUiFrameAt = nowPerf;
+  }
+
+  renderAnimatedStats(nowPerf);
+  animatePlayerCounters(nowPerf);
+  animateChartTowardsTarget(nowPerf);
+
+  if (nowPerf - state.lastStaleCheckAt >= 1000) {
+    state.lastStaleCheckAt = nowPerf;
+    checkStaleConnection();
+  }
+
+  if (nowPerf - state.lastFallbackCheckAt >= FALLBACK_REFRESH_MS) {
+    state.lastFallbackCheckAt = nowPerf;
     const staleRealtime = Date.now() - state.lastRealtimeAt > FALLBACK_REFRESH_MS;
     if (!state.realtimeConnected || staleRealtime) {
       runFallbackRefresh();
     }
-  }, FALLBACK_REFRESH_MS);
-  state.staleTimer = window.setInterval(checkStaleConnection, 1000);
+  }
+
+  state.uiFrameId = window.requestAnimationFrame(uiAnimationLoop);
+}
+
+function startRealtime() {
+  fetchStats();
+  setupLeaderboardLazyLoad();
+  connectRealtime();
+  state.uiFrameId = window.requestAnimationFrame(uiAnimationLoop);
 }
 
 function bindEvents() {
