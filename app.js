@@ -24,15 +24,6 @@ const state = {
   playerNodeMap: new Map(),
   playerAvatarCache: new Map(),
   lastPlayersSignature: '',
-  leaderboardAvatarCache: new Map(),
-  leaderboardsReady: false,
-  leaderboardObserver: null,
-  leaderboards: {
-    kills: { signature: '' },
-    balance: { signature: '' },
-    bounty: { signature: '' },
-    earnings: { signature: '' },
-  },
   uiFrameId: 0,
   lastUiFrameAt: 0,
   lastStaleCheckAt: 0,
@@ -92,12 +83,6 @@ const elements = {
   playerList: document.getElementById('playerList'),
   chartCanvas: document.getElementById('usageChart'),
   chartCard: document.querySelector('.chart-card'),
-  leaderboardLists: {
-    kills: document.getElementById('killsLeaderboardList'),
-    balance: document.getElementById('balanceLeaderboardList'),
-    bounty: document.getElementById('bountyLeaderboardList'),
-    earnings: document.getElementById('earningsLeaderboardList'),
-  },
 };
 
 function setAnimatedText(element, nextText) {
@@ -917,189 +902,6 @@ function removePlayerFromRealtime(payload) {
   syncPlayerCount();
 }
 
-function normalizeLeaderboardEntry(entry) {
-  if (!entry || typeof entry !== 'object') {
-    return null;
-  }
-
-  const username = String(entry.username || entry.name || entry.player || '').trim();
-  const uuid = String(entry.uuid || entry.id || '').trim();
-  const key = uuid || username.toLowerCase();
-  const value = Number(entry.value || entry.score || entry.amount || entry.balance || 0);
-
-  if (!username || !key || !Number.isFinite(value)) {
-    return null;
-  }
-
-  return {
-    key,
-    uuid,
-    username,
-    value,
-    avatarUrl: String(entry.avatarUrl || '').trim(),
-  };
-}
-
-function buildLeaderboardSignature(items) {
-  return items.map((item) => `${item.key}:${item.value}`).join('|');
-}
-
-function renderLeaderboardCategory(name, items, loading = false) {
-  const list = elements.leaderboardLists[name];
-  if (!list) {
-    return;
-  }
-
-  if (loading && !items.length) {
-    if (state.leaderboards[name].signature) {
-      return;
-    }
-    list.innerHTML = '<div class="mini-empty">Loading...</div>';
-    return;
-  }
-
-  if (!items.length) {
-    list.innerHTML = '<div class="mini-empty">No ranking data yet</div>';
-    return;
-  }
-
-  const signature = buildLeaderboardSignature(items);
-  if (signature === state.leaderboards[name].signature) {
-    return;
-  }
-
-  state.leaderboards[name].signature = signature;
-
-  const fragment = document.createDocumentFragment();
-  items.slice(0, 5).forEach((entry, index) => {
-    const row = document.createElement('div');
-    row.className = 'leaderboard-mini-row';
-
-    const rank = document.createElement('span');
-    rank.className = 'mini-rank';
-    rank.textContent = `#${index + 1}`;
-
-    const avatar = document.createElement('img');
-    avatar.className = 'mini-avatar';
-    avatar.width = 30;
-    avatar.height = 30;
-    avatar.alt = `${entry.username} avatar`;
-    avatar.loading = 'lazy';
-    avatar.decoding = 'async';
-
-    const nameNode = document.createElement('span');
-    nameNode.className = 'mini-name';
-    nameNode.textContent = entry.username;
-
-    const value = document.createElement('span');
-    value.className = 'mini-value';
-    value.textContent = formatNumber(entry.value);
-
-    configureAvatarImage(
-      avatar,
-      state.leaderboardAvatarCache,
-      `leaderboard:${name}:${entry.key}`,
-      entry.uuid || entry.username,
-      entry.username,
-      48,
-      entry.avatarUrl
-    );
-
-    row.appendChild(rank);
-    row.appendChild(avatar);
-    row.appendChild(nameNode);
-    row.appendChild(value);
-
-    fragment.appendChild(row);
-  });
-
-  list.replaceChildren(fragment);
-}
-
-async function fetchCategory(name, endpoint) {
-  try {
-    const response = await fetch(endpoint, {
-      method: 'GET',
-      cache: 'no-store',
-      headers: { Accept: 'application/json' },
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const payload = await response.json();
-    const rows = (Array.isArray(payload) ? payload : payload?.items || payload?.data || payload?.entries || [])
-      .map(normalizeLeaderboardEntry)
-      .filter(Boolean)
-      .sort((a, b) => b.value - a.value);
-
-    renderLeaderboardCategory(name, rows);
-  } catch (error) {
-    renderLeaderboardCategory(name, [], false);
-  }
-}
-
-async function fetchLeaderboards() {
-  const firstLoad = !state.leaderboards.kills.signature
-    && !state.leaderboards.balance.signature
-    && !state.leaderboards.bounty.signature
-    && !state.leaderboards.earnings.signature;
-
-  if (firstLoad) {
-    renderLeaderboardCategory('kills', [], true);
-    renderLeaderboardCategory('balance', [], true);
-    renderLeaderboardCategory('bounty', [], true);
-    renderLeaderboardCategory('earnings', [], true);
-  }
-
-  await Promise.all([
-    fetchCategory('kills', '/api/leaderboard/kills'),
-    fetchCategory('balance', '/api/leaderboard/balance'),
-    fetchCategory('bounty', '/api/leaderboard/bounty'),
-    fetchCategory('earnings', '/api/leaderboard/earnings'),
-  ]);
-}
-
-function setupLeaderboardLazyLoad() {
-  const section = document.querySelector('.dashboard-leaderboards');
-
-  if (!section) {
-    state.leaderboardsReady = true;
-    fetchLeaderboards();
-    return;
-  }
-
-  const trigger = () => {
-    if (state.leaderboardsReady) {
-      return;
-    }
-
-    state.leaderboardsReady = true;
-    fetchLeaderboards();
-
-    if (state.leaderboardObserver) {
-      state.leaderboardObserver.disconnect();
-      state.leaderboardObserver = null;
-    }
-  };
-
-  if (!('IntersectionObserver' in window)) {
-    trigger();
-    return;
-  }
-
-  state.leaderboardObserver = new IntersectionObserver((entries) => {
-    const visible = entries.some((entry) => entry.isIntersecting);
-    if (visible) {
-      trigger();
-    }
-  }, {
-    rootMargin: '120px',
-  });
-
-  state.leaderboardObserver.observe(section);
-}
 
 function renderLoading() {
   state.hasData = false;
@@ -1424,33 +1226,6 @@ function checkStaleConnection() {
 function runFallbackRefresh() {
   fetchStats();
   fetchPlayers();
-
-  if (state.leaderboardsReady) {
-    fetchLeaderboards();
-  }
-}
-
-function normalizeLeaderboardEventItems(items) {
-  return (Array.isArray(items) ? items : [])
-    .map(normalizeLeaderboardEntry)
-    .filter(Boolean)
-    .sort((a, b) => b.value - a.value);
-}
-
-function applyRealtimeLeaderboardUpdate(event) {
-  const categoryMap = {
-    kills: 'kills',
-    balance: 'balance',
-    bounty: 'bounty',
-    earnings: 'earnings',
-  };
-
-  const mapped = categoryMap[String(event?.category || '').toLowerCase()];
-  if (!mapped || !state.leaderboardsReady) {
-    return;
-  }
-
-  renderLeaderboardCategory(mapped, normalizeLeaderboardEventItems(event.items || []));
 }
 
 function attachRealtimeBindings(channel) {
@@ -1465,11 +1240,6 @@ function attachRealtimeBindings(channel) {
     renderData({ data: { latest: event.latest, history: [] } }, 'realtime');
   });
 
-  channel.bind('leaderboard_update', (event) => {
-    state.lastRealtimeAt = Date.now();
-    console.log('[DXIR RT] leaderboard_update', event?.category || 'unknown');
-    applyRealtimeLeaderboardUpdate(event || {});
-  });
 
   channel.bind('player_join', (event) => {
     state.lastRealtimeAt = Date.now();
@@ -1611,7 +1381,6 @@ function uiAnimationLoop(nowPerf) {
 
 function startRealtime() {
   fetchStats();
-  setupLeaderboardLazyLoad();
   connectRealtime();
   state.autoFetchTimer = window.setInterval(fetchStats, AUTO_FETCH_MS);
   state.uiFrameId = window.requestAnimationFrame(uiAnimationLoop);

@@ -31,7 +31,7 @@
     <div class="app-layout">
       <aside class="sidebar" id="sidebarNav">
         <div class="sidebar-brand">
-          <div class="brand-mark" aria-hidden="true"><span></span></div>
+          <img class="brand-mark" src="/minecraft-logo.svg" alt="Minecraft logo" />
           <div>
             <p class="eyebrow">Navigation</p>
             <h2>DXIR STATS</h2>
@@ -42,14 +42,6 @@
           <a class="sidebar-link is-active" data-nav="dashboard" href="/">
             <span class="sidebar-link__icon" aria-hidden="true">◧</span>
             <span>Dashboard</span>
-          </a>
-          <a class="sidebar-link" data-nav="players" href="/#players-section">
-            <span class="sidebar-link__icon" aria-hidden="true">◎</span>
-            <span>Players</span>
-          </a>
-          <a class="sidebar-link" data-nav="leaderboard" href="/leaderboard">
-            <span class="sidebar-link__icon" aria-hidden="true">◈</span>
-            <span>Leaderboard</span>
           </a>
           <a class="sidebar-link" data-nav="analytics" href="/analytics">
             <span class="sidebar-link__icon" aria-hidden="true">▣</span>
@@ -171,40 +163,6 @@
                 <span class="health-line__text" id="healthRecommendationText">No action required</span>
               </div>
             </div>
-          </article>
-        </section>
-
-        <section class="dashboard-leaderboards" aria-label="Leaderboard preview">
-          <article class="card leaderboard-mini-card">
-            <div class="card-head compact-head">
-              <h3>Top Kills</h3>
-              <a href="/leaderboard">View all</a>
-            </div>
-            <div class="leaderboard-mini-list" id="killsLeaderboardList"></div>
-          </article>
-
-          <article class="card leaderboard-mini-card">
-            <div class="card-head compact-head">
-              <h3>Richest Players</h3>
-              <a href="/leaderboard">View all</a>
-            </div>
-            <div class="leaderboard-mini-list" id="balanceLeaderboardList"></div>
-          </article>
-
-          <article class="card leaderboard-mini-card">
-            <div class="card-head compact-head">
-              <h3>Highest Bounty</h3>
-              <a href="/leaderboard">View all</a>
-            </div>
-            <div class="leaderboard-mini-list" id="bountyLeaderboardList"></div>
-          </article>
-
-          <article class="card leaderboard-mini-card">
-            <div class="card-head compact-head">
-              <h3>Top Earners</h3>
-              <a href="/leaderboard">View all</a>
-            </div>
-            <div class="leaderboard-mini-list" id="earningsLeaderboardList"></div>
           </article>
         </section>
 
