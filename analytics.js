@@ -1,9 +1,9 @@
 const THEME_STORAGE_KEY = 'dxir-theme';
 const FALLBACK_REFRESH_MS = 15000;
 const AUTO_FETCH_MS = 2000;
+const DATA_PUSH_MS = 1000;
 const MAX_POINTS = 200;
-const SMOOTH_SPEED = 5;
-const FLOW_POINTS_PER_SEC = 26;
+const EASE = 0.08;
 const GRID_LINES = 6;
 
 const state = {
@@ -16,10 +16,11 @@ const state = {
   frameId: 0,
   targetCPU: 0,
   animatedCPU: 0,
-  targetRam: 0,
-  animatedRam: 0,
+  targetRamUsed: 0,
+  animatedRamUsed: 0,
+  targetRamPercent: 0,
+  animatedRamPercent: 0,
   points: [],
-  pointAccumulator: 0,
   pusher: null,
   channel: null,
   canvas: null,
@@ -28,6 +29,7 @@ const state = {
   width: 0,
   height: 0,
   autoFetchTimer: 0,
+  pointPushTimer: 0,
 };
 
 const elements = {
@@ -76,18 +78,8 @@ function applyTheme(theme, persist = true) {
   }
 }
 
-function lerp(current, target, factor) {
-  return current + (target - current) * factor;
-}
-
-function smoothStepFactor(speed, deltaSeconds) {
-  const dt = Math.max(0, Number(deltaSeconds) || 0);
-  if (dt <= 0) {
-    return 0;
-  }
-
-  // Exponential smoothing gives stable animation across varying frame times.
-  return 1 - Math.exp(-speed * dt);
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function normalizeNumber(value, fallback = 0) {
@@ -139,9 +131,16 @@ function resizeCanvas() {
 }
 
 function pushPoint() {
+  if (!Number.isFinite(state.animatedCPU) || !Number.isFinite(state.animatedRamPercent)) {
+    return;
+  }
+
+  const cpu = clamp(state.animatedCPU, 0, 100);
+  const ram = clamp(state.animatedRamPercent, 0, 100);
+
   state.points.push({
-    cpu: state.animatedCPU,
-    ram: state.animatedRam,
+    cpu,
+    ram,
   });
 
   if (state.points.length > MAX_POINTS) {
@@ -245,15 +244,19 @@ function drawGraph() {
 function ingestSnapshot(snapshot, source = 'stream') {
   const cpu = Math.max(0, normalizeNumber(snapshot?.cpu, 0));
   const ramUsed = Math.max(0, normalizeNumber(snapshot?.ramUsed, normalizeNumber(snapshot?.ram, 0) / 1024));
+  const ramMax = Math.max(0, normalizeNumber(snapshot?.ramMax, 0));
+  const ramPercent = ramMax > 0 ? (ramUsed / ramMax) * 100 : 0;
 
-  state.targetCPU = cpu;
-  state.targetRam = ramUsed;
+  state.targetCPU = clamp(cpu, 0, 100);
+  state.targetRamUsed = Math.max(0, ramUsed);
+  state.targetRamPercent = clamp(ramPercent, 0, 100);
   state.source = source;
 
   // Prevent a large visual jump on first payload.
-  if (!state.points.length && state.animatedCPU === 0 && state.animatedRam === 0) {
-    state.animatedCPU = cpu;
-    state.animatedRam = ramUsed;
+  if (!state.points.length && state.animatedCPU === 0 && state.animatedRamUsed === 0) {
+    state.animatedCPU = state.targetCPU;
+    state.animatedRamUsed = state.targetRamUsed;
+    state.animatedRamPercent = state.targetRamPercent;
   }
 }
 
@@ -351,7 +354,6 @@ async function connectRealtime() {
 
 function clearGraph() {
   state.points = [];
-  state.pointAccumulator = 0;
   drawGraph();
 }
 
@@ -360,21 +362,16 @@ function loop(nowPerf) {
     state.lastFrameAt = nowPerf;
   }
 
-  const deltaSeconds = Math.max(0, Math.min((nowPerf - state.lastFrameAt) / 1000, 0.2));
   state.lastFrameAt = nowPerf;
 
   if (!state.isPaused) {
-    const factor = smoothStepFactor(SMOOTH_SPEED, deltaSeconds);
-    state.animatedCPU = lerp(state.animatedCPU, state.targetCPU, factor);
-    state.animatedRam = lerp(state.animatedRam, state.targetRam, factor);
+    state.animatedCPU += (state.targetCPU - state.animatedCPU) * EASE;
+    state.animatedRamUsed += (state.targetRamUsed - state.animatedRamUsed) * EASE;
+    state.animatedRamPercent += (state.targetRamPercent - state.animatedRamPercent) * EASE;
 
-    // Continuously stream interpolated points so the graph never "waits" on backend updates.
-    const sampleIntervalMs = 1000 / FLOW_POINTS_PER_SEC;
-    state.pointAccumulator += deltaSeconds * 1000;
-    while (state.pointAccumulator >= sampleIntervalMs) {
-      state.pointAccumulator -= sampleIntervalMs;
-      pushPoint();
-    }
+    state.animatedCPU = clamp(state.animatedCPU, 0, 100);
+    state.animatedRamUsed = Math.max(0, state.animatedRamUsed);
+    state.animatedRamPercent = clamp(state.animatedRamPercent, 0, 100);
 
     state.lastSampleAt = nowPerf;
   }
@@ -383,7 +380,7 @@ function loop(nowPerf) {
     elements.cpuText.textContent = `CPU: ${state.animatedCPU.toFixed(1)}%`;
   }
   if (elements.ramText) {
-    elements.ramText.textContent = `RAM: ${state.animatedRam.toFixed(2)} GB`;
+    elements.ramText.textContent = `RAM: ${state.animatedRamUsed.toFixed(2)} GB (${state.animatedRamPercent.toFixed(1)}%)`;
   }
   if (elements.sourceText) {
     elements.sourceText.textContent = `Source: ${state.source}`;
@@ -430,6 +427,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initCanvas();
   fetchSnapshot();
   state.autoFetchTimer = window.setInterval(fetchSnapshot, AUTO_FETCH_MS);
+  state.pointPushTimer = window.setInterval(pushPoint, DATA_PUSH_MS);
   connectRealtime();
   state.frameId = window.requestAnimationFrame(loop);
 });
