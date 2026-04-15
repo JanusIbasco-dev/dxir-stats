@@ -2,7 +2,6 @@ const CATEGORY_ORDER = ['topKills', 'richest', 'bounty', 'earnings', 'playtime']
 const MAX_VISIBLE_ROWS = 10;
 const THEME_STORAGE_KEY = 'dxir-theme';
 const FALLBACK_REFRESH_MS = 15000;
-const DEFAULT_AVATAR_DATA_URI = 'data:image/svg+xml;utf8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2264%22 height=%2264%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2212%22 fill=%22%231e293b%22/%3E%3Ccircle cx=%2232%22 cy=%2225%22 r=%2212%22 fill=%22%236b7280%22/%3E%3Cpath d=%22M12 56c2-10 10-16 20-16s18 6 20 16%22 fill=%22%236b7280%22/%3E%3C/svg%3E';
 
 const state = {
   theme: 'dark',
@@ -127,40 +126,24 @@ function setStatus(message, stateName = 'ready') {
   elements.status.dataset.state = stateName;
 }
 
-function normalizeAvatarUuid(value) {
-  const compact = String(value || '').trim().toLowerCase().replace(/-/g, '');
-  return /^[0-9a-f]{32}$/.test(compact) ? compact : '';
+function getAvatarUrl(entry) {
+  const cached = String(entry?.avatarUrl || '').trim();
+  if (cached) {
+    return cached;
+  }
+
+  const source = String(entry?.uuid || '').trim();
+  return source ? `https://mc-heads.net/avatar/${encodeURIComponent(source)}/64` : '';
 }
 
-function getAvatarCandidates(entry, cachedResolved) {
-  const candidates = [];
-  const add = (url) => {
-    const next = String(url || '').trim();
-    if (!next || candidates.includes(next)) {
-      return;
-    }
-    candidates.push(next);
-  };
+function getAvatarFallbackUrl(entry) {
+  const source = String(entry?.username || '').trim();
+  return source ? `https://ely.by/avatar/${encodeURIComponent(source)}` : '';
+}
 
-  add(cachedResolved);
-
-  const provided = String(entry?.avatarUrl || '').trim();
-  if (/^https:\/\/(mc-heads\.net|minotar\.net)\/avatar\//i.test(provided)) {
-    add(provided);
-  }
-
-  const uuid = normalizeAvatarUuid(entry?.uuid);
-  if (uuid) {
-    add(`https://mc-heads.net/avatar/${encodeURIComponent(uuid)}/64`);
-  }
-
-  const username = String(entry?.username || '').trim();
-  if (username) {
-    add(`https://minotar.net/avatar/${encodeURIComponent(username)}/64`);
-  }
-
-  add(DEFAULT_AVATAR_DATA_URI);
-  return candidates;
+function getAvatarLastFallbackUrl(entry) {
+  const source = String(entry?.username || '').trim();
+  return source ? `https://minotar.net/avatar/${encodeURIComponent(source)}/64` : '';
 }
 
 function configureAvatar(image, entry) {
@@ -169,70 +152,54 @@ function configureAvatar(image, entry) {
   }
 
   const key = entry.key;
-  const cachedResolved = state.avatarCache.get(key) || '';
-  const candidates = getAvatarCandidates(entry, cachedResolved);
-  const first = candidates[0] || '';
-  let candidateIndex = 0;
+  const primary = getAvatarUrl(entry);
+  const fallback = getAvatarFallbackUrl(entry);
+  const finalFallback = getAvatarLastFallbackUrl(entry);
+  const cached = state.avatarCache.get(key) || {};
+  let usedFallback = false;
+  let usedFinalFallback = false;
 
   image.classList.remove('loaded');
   image.dataset.avatarKey = key;
   image.alt = `${entry.username} avatar`;
 
-  if (image.dataset.avatarResolved === first && image.src === first) {
+  if (cached.current === primary || cached.current === fallback) {
+    if (image.src !== cached.current) {
+      image.src = cached.current;
+    }
     if (image.complete && image.naturalWidth > 0) {
       image.classList.add('loaded');
     }
     return;
   }
 
-  const loadCandidate = (index) => {
-    candidateIndex = index;
-    const candidate = candidates[index];
-    if (!candidate) {
-      image.onerror = null;
-      image.dataset.avatarResolved = DEFAULT_AVATAR_DATA_URI;
-      image.classList.add('loaded');
-      return;
-    }
-
-    if (image.src !== candidate) {
-      image.src = candidate;
-    }
-  };
-
+  image.src = primary;
   image.onload = () => {
-    const resolved = image.src || candidates[candidateIndex] || first;
-    state.avatarCache.set(key, resolved);
-    image.dataset.avatarResolved = resolved;
-    console.debug('[DXIR Avatar]', {
-      username: String(entry.username || '').trim(),
-      uuid: normalizeAvatarUuid(entry.uuid),
-      finalAvatarUrl: resolved,
-    });
+    state.avatarCache.set(key, { current: primary });
     image.classList.add('loaded');
   };
 
   image.onerror = () => {
-    if (candidateIndex + 1 < candidates.length) {
-      loadCandidate(candidateIndex + 1);
+    if (!usedFallback && fallback) {
+      usedFallback = true;
+      state.avatarCache.set(key, { current: fallback });
+      image.src = fallback;
+      return;
+    }
+
+    if (!usedFinalFallback && finalFallback) {
+      usedFinalFallback = true;
+      state.avatarCache.set(key, { current: finalFallback });
+      image.src = finalFallback;
       return;
     }
 
     image.onerror = null;
-    image.dataset.avatarResolved = DEFAULT_AVATAR_DATA_URI;
-    console.debug('[DXIR Avatar]', {
-      username: String(entry.username || '').trim(),
-      uuid: normalizeAvatarUuid(entry.uuid),
-      finalAvatarUrl: DEFAULT_AVATAR_DATA_URI,
-    });
     image.classList.add('loaded');
   };
 
-  loadCandidate(0);
-
   if (image.complete && image.naturalWidth > 0) {
-    state.avatarCache.set(key, image.src || first);
-    image.dataset.avatarResolved = image.src || first;
+    state.avatarCache.set(key, { current: image.src });
     image.classList.add('loaded');
   }
 }

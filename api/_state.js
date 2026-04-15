@@ -126,7 +126,7 @@ function buildAvatarUrl(uuid, size = 64) {
 
 function buildCrackedAvatarUrl(username) {
   const clean = String(username || '').trim();
-  return clean ? `https://minotar.net/avatar/${encodeURIComponent(clean)}/64` : '';
+  return clean ? `https://ely.by/avatar/${encodeURIComponent(clean)}` : '';
 }
 
 function buildFallbackAvatarUrl(username, size = 64) {
