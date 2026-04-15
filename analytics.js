@@ -2,7 +2,7 @@ const THEME_STORAGE_KEY = 'dxir-theme';
 const FALLBACK_REFRESH_MS = 15000;
 const AUTO_FETCH_MS = 2000;
 const DATA_PUSH_MS = 1000;
-const MAX_POINTS = 200;
+const MAX_POINTS = 60;
 const EASE = 0.08;
 const GRID_LINES = 6;
 
@@ -176,12 +176,23 @@ function drawLine(ctx, values, color, width, height) {
 
   const stepX = width / Math.max(1, MAX_POINTS - 1);
   const points = values.map((value, index) => {
+    const safeValue = Number.isFinite(Number(value)) ? Number(value) : null;
+    if (safeValue === null) {
+      return null;
+    }
+
     const normalized = Math.max(0, Math.min(1, Number(value || 0) / 100));
+    // Keep x spacing stable and right-anchored to avoid visual jumps when shifting.
+    const x = width - ((values.length - 1 - index) * stepX);
     return {
-      x: index * stepX,
+      x,
       y: height - normalized * height,
     };
-  });
+  }).filter(Boolean);
+
+  if (points.length < 2) {
+    return;
+  }
 
   ctx.beginPath();
   ctx.lineJoin = 'round';
@@ -373,7 +384,6 @@ function loop(nowPerf) {
     state.animatedRamUsed = Math.max(0, state.animatedRamUsed);
     state.animatedRamPercent = clamp(state.animatedRamPercent, 0, 100);
 
-    state.lastSampleAt = nowPerf;
   }
 
   if (elements.cpuText) {
