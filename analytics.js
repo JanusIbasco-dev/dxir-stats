@@ -1,7 +1,8 @@
 const THEME_STORAGE_KEY = 'dxir-theme';
 const FALLBACK_REFRESH_MS = 15000;
 const MAX_POINTS = 200;
-const SAMPLE_INTERVAL_MS = 220;
+const SAMPLE_INTERVAL_MS = 90;
+const SMOOTH_SPEED = 5;
 
 const state = {
   chart: null,
@@ -23,6 +24,8 @@ const state = {
   animatedRam: 0,
   pusher: null,
   channel: null,
+  sampleAccumulatorMs: 0,
+  virtualPointTime: Date.now(),
 };
 
 const elements = {
@@ -73,6 +76,16 @@ function applyTheme(theme, persist = true) {
 
 function lerp(current, target, factor) {
   return current + (target - current) * factor;
+}
+
+function smoothStepFactor(speed, deltaSeconds) {
+  const dt = Math.max(0, Number(deltaSeconds) || 0);
+  if (dt <= 0) {
+    return 0;
+  }
+
+  // Exponential smoothing gives stable animation across varying frame times.
+  return 1 - Math.exp(-speed * dt);
 }
 
 function normalizeNumber(value, fallback = 0) {
@@ -197,10 +210,8 @@ function renderChart(nowPerf) {
   const cpuVisible = elements.toggleCpu ? elements.toggleCpu.checked : true;
   const ramVisible = elements.toggleRam ? elements.toggleRam.checked : true;
 
-  state.chart.data.labels = [...state.labels];
-  state.chart.data.datasets[0].data = [...state.cpuData];
+  // Data arrays are already referenced by Chart.js; only visibility flags need toggling.
   state.chart.data.datasets[0].hidden = !cpuVisible;
-  state.chart.data.datasets[1].data = [...state.ramData];
   state.chart.data.datasets[1].hidden = !ramVisible;
   state.chart.update('none');
 }
@@ -212,6 +223,12 @@ function ingestSnapshot(snapshot, source = 'stream') {
   state.targetCPU = cpu;
   state.targetRam = ramUsed;
   state.source = source;
+
+  // Prevent a large visual jump on first payload.
+  if (!state.labels.length && state.animatedCPU === 0 && state.animatedRam === 0) {
+    state.animatedCPU = cpu;
+    state.animatedRam = ramUsed;
+  }
 }
 
 async function fetchSnapshot() {
@@ -307,6 +324,8 @@ function clearGraph() {
   state.labels = [];
   state.cpuData = [];
   state.ramData = [];
+  state.sampleAccumulatorMs = 0;
+  state.virtualPointTime = Date.now();
   if (state.chart) {
     state.chart.data.labels = [];
     state.chart.data.datasets[0].data = [];
@@ -320,14 +339,23 @@ function loop(nowPerf) {
     state.lastFrameAt = nowPerf;
   }
 
-  if (!state.isPaused) {
-    state.animatedCPU = lerp(state.animatedCPU, state.targetCPU, 0.1);
-    state.animatedRam = lerp(state.animatedRam, state.targetRam, 0.1);
+  const deltaSeconds = Math.max(0, Math.min((nowPerf - state.lastFrameAt) / 1000, 0.2));
+  state.lastFrameAt = nowPerf;
 
-    if (nowPerf - state.lastSampleAt >= SAMPLE_INTERVAL_MS) {
-      state.lastSampleAt = nowPerf;
-      pushPoint(Date.now());
+  if (!state.isPaused) {
+    const factor = smoothStepFactor(SMOOTH_SPEED, deltaSeconds);
+    state.animatedCPU = lerp(state.animatedCPU, state.targetCPU, factor);
+    state.animatedRam = lerp(state.animatedRam, state.targetRam, factor);
+
+    // Continuously stream interpolated points so the graph never "waits" on backend updates.
+    state.sampleAccumulatorMs += deltaSeconds * 1000;
+    while (state.sampleAccumulatorMs >= SAMPLE_INTERVAL_MS) {
+      state.sampleAccumulatorMs -= SAMPLE_INTERVAL_MS;
+      state.virtualPointTime += SAMPLE_INTERVAL_MS;
+      pushPoint(state.virtualPointTime);
     }
+
+    state.lastSampleAt = nowPerf;
   }
 
   if (elements.cpuText) {
