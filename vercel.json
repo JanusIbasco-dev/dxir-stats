@@ -10,6 +10,14 @@
       "destination": "/leaderboard.html"
     },
     {
+      "source": "/analytics",
+      "destination": "/analytics.html"
+    },
+    {
+      "source": "/analytics/",
+      "destination": "/analytics.html"
+    },
+    {
       "source": "/api",
       "destination": "/api/data"
     },

@@ -8,6 +8,7 @@ Production-ready Minecraft monitoring dashboard for Vercel with:
 - AFK-aware playtime tracking (session/total/daily/weekly)
 - Live leaderboard categories (`kills`, `balance`, `bounty`, `earnings`, `playtime`)
 - Realtime websocket updates (no frontend polling loops)
+- Full-screen analytics view at `/analytics` with smooth CPU/RAM stream controls
 
 ## Run locally
 
