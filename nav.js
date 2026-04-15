@@ -17,7 +17,6 @@
     links.forEach((link) => {
       const navKey = String(link.dataset.nav || '').toLowerCase();
       const shouldActivateByHash =
-        (hash === '#players-section' && navKey === 'players') ||
         (hash === '#settings-section' && navKey === 'settings');
 
       const shouldActivate = shouldActivateByHash || (hash === '' && navKey === page);

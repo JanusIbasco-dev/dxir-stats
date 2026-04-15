@@ -31,7 +31,7 @@
     <div class="app-layout">
       <aside class="sidebar" id="sidebarNav">
         <div class="sidebar-brand">
-          <div class="brand-mark" aria-hidden="true"><span></span></div>
+          <img class="brand-logo" src="/minecraft-logo.svg" alt="Minecraft logo" width="36" height="36" />
           <div>
             <p class="eyebrow">Navigation</p>
             <h2>DXIR STATS</h2>
@@ -42,14 +42,6 @@
           <a class="sidebar-link is-active" data-nav="dashboard" href="/">
             <span class="sidebar-link__icon" aria-hidden="true">◧</span>
             <span>Dashboard</span>
-          </a>
-          <a class="sidebar-link" data-nav="players" href="/#players-section">
-            <span class="sidebar-link__icon" aria-hidden="true">◎</span>
-            <span>Players</span>
-          </a>
-          <a class="sidebar-link" data-nav="leaderboard" href="/leaderboard">
-            <span class="sidebar-link__icon" aria-hidden="true">◈</span>
-            <span>Leaderboard</span>
           </a>
           <a class="sidebar-link" data-nav="analytics" href="/analytics">
             <span class="sidebar-link__icon" aria-hidden="true">▣</span>
@@ -78,7 +70,7 @@
           <div class="topbar-copy">
             <p class="eyebrow">Server monitoring dashboard</p>
             <h1>DXIR STATS</h1>
-            <p class="header-copy">Live CPU, RAM, players, and leaderboard intelligence.</p>
+            <p class="header-copy">Live CPU, RAM, uptime, and system health insights.</p>
           </div>
 
           <div class="connection-pill" id="connectionStatus" data-state="loading">
@@ -112,10 +104,6 @@
                 <strong id="ramValue" class="ram-value">--</strong>
               </div>
               <div class="info-chip">
-                <span class="value-label">Players</span>
-                <strong id="playersValue">--</strong>
-              </div>
-              <div class="info-chip">
                 <span class="value-label">IP</span>
                 <strong id="serverIpValue">--</strong>
               </div>
@@ -123,18 +111,6 @@
 
             <p class="status-line" id="apiMessage">Waiting for the first server update...</p>
             <p class="status-line">Last updated: <span id="timeValue">--</span></p>
-          </article>
-
-          <article class="card dashboard-card players-card" id="players-section">
-            <div class="card-head">
-              <div>
-                <p class="stat-kicker">Players</p>
-                <h2 class="stat-title">Online Now</h2>
-              </div>
-              <span class="stat-count" id="playersCountMirror">--</span>
-            </div>
-
-            <div class="player-list" id="playerList" aria-live="polite"></div>
           </article>
 
           <article class="card dashboard-card chart-card">
@@ -171,40 +147,6 @@
                 <span class="health-line__text" id="healthRecommendationText">No action required</span>
               </div>
             </div>
-          </article>
-        </section>
-
-        <section class="dashboard-leaderboards" aria-label="Leaderboard preview">
-          <article class="card leaderboard-mini-card">
-            <div class="card-head compact-head">
-              <h3>Top Kills</h3>
-              <a href="/leaderboard">View all</a>
-            </div>
-            <div class="leaderboard-mini-list" id="killsLeaderboardList"></div>
-          </article>
-
-          <article class="card leaderboard-mini-card">
-            <div class="card-head compact-head">
-              <h3>Richest Players</h3>
-              <a href="/leaderboard">View all</a>
-            </div>
-            <div class="leaderboard-mini-list" id="balanceLeaderboardList"></div>
-          </article>
-
-          <article class="card leaderboard-mini-card">
-            <div class="card-head compact-head">
-              <h3>Highest Bounty</h3>
-              <a href="/leaderboard">View all</a>
-            </div>
-            <div class="leaderboard-mini-list" id="bountyLeaderboardList"></div>
-          </article>
-
-          <article class="card leaderboard-mini-card">
-            <div class="card-head compact-head">
-              <h3>Top Earners</h3>
-              <a href="/leaderboard">View all</a>
-            </div>
-            <div class="leaderboard-mini-list" id="earningsLeaderboardList"></div>
           </article>
         </section>
 
