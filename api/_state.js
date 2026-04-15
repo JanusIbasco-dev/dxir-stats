@@ -403,6 +403,9 @@ function attachLiveCounters(record, timestamp) {
     totalPlaytime,
     dailyPlaytime,
     weeklyPlaytime,
+    counterUpdatedAt: timestamp,
+    lastJoin: Number(record.joinTime || 0),
+    online: Boolean(record.isOnline),
   };
 }
 

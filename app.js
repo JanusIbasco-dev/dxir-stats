@@ -53,6 +53,7 @@ const state = {
   lastSnapshotUpdateAt: 0,
   playerTransitionTimers: new Map(),
   autoFetchTimer: 0,
+  lastPlayerTickAt: 0,
 };
 
 const elements = {
@@ -547,20 +548,72 @@ function normalizePlayer(raw) {
     return null;
   }
 
+  const hasOwn = (field) => Object.prototype.hasOwnProperty.call(raw, field);
+  const readOptionalNumber = (field, fallback = null) => {
+    if (!hasOwn(field) || raw[field] == null || raw[field] === '') {
+      return fallback;
+    }
+
+    const parsed = normalizeNumber(raw[field], Number.NaN);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const explicitOnline = hasOwn('online') ? Boolean(raw.online) : null;
+  const normalizedStatus = String(raw.status || '').toLowerCase() === 'offline' ? 'offline' : 'online';
+
   return {
     key,
     uuid,
     name,
     avatarUrl: String(raw.avatarUrl || '').trim(),
-    ping: Math.max(0, normalizeNumber(raw.ping, 0)),
-    status: String(raw.status || 'online').toLowerCase() === 'offline' ? 'offline' : 'online',
+    ping: readOptionalNumber('ping', 0),
+    status: normalizedStatus,
+    online: explicitOnline == null ? normalizedStatus === 'online' : explicitOnline,
+    lastJoin: readOptionalNumber('lastJoin', 0),
+    counterUpdatedAt: readOptionalNumber('counterUpdatedAt', Date.now()),
     isAFK: Boolean(raw.isAFK),
-    sessionTime: Math.max(0, Math.floor(normalizeNumber(raw.sessionTime, 0))),
-    totalPlaytime: Math.max(0, Math.floor(normalizeNumber(raw.totalPlaytime, 0))),
-    dailyPlaytime: Math.max(0, Math.floor(normalizeNumber(raw.dailyPlaytime, 0))),
-    weeklyPlaytime: Math.max(0, Math.floor(normalizeNumber(raw.weeklyPlaytime, 0))),
-    counterUpdatedPerf: performance.now(),
+    sessionTime: readOptionalNumber('sessionTime', null),
+    totalPlaytime: readOptionalNumber('totalPlaytime', readOptionalNumber('playtime', null)),
+    dailyPlaytime: readOptionalNumber('dailyPlaytime', null),
+    weeklyPlaytime: readOptionalNumber('weeklyPlaytime', null),
   };
+}
+
+function mergePlayerState(previous, incoming) {
+  const next = { ...(previous || {}), ...(incoming || {}) };
+  const carryNumber = (field, fallback = 0) => {
+    if (!Number.isFinite(next[field])) {
+      if (previous && Number.isFinite(previous[field])) {
+        next[field] = previous[field];
+      } else {
+        next[field] = fallback;
+      }
+    }
+  };
+
+  next.uuid = String(next.uuid || previous?.uuid || '').trim();
+  next.avatarUrl = String(next.avatarUrl || previous?.avatarUrl || '').trim();
+  next.status = String(next.status || previous?.status || 'online').toLowerCase() === 'offline' ? 'offline' : 'online';
+  next.online = typeof next.online === 'boolean' ? next.online : next.status === 'online';
+  next.isAFK = Boolean(next.isAFK);
+
+  carryNumber('ping', 0);
+  carryNumber('sessionTime', 0);
+  carryNumber('totalPlaytime', 0);
+  carryNumber('dailyPlaytime', 0);
+  carryNumber('weeklyPlaytime', 0);
+  carryNumber('lastJoin', 0);
+  carryNumber('counterUpdatedAt', Date.now());
+
+  next.ping = Math.max(0, Number(next.ping || 0));
+  next.sessionTime = Math.max(0, Math.floor(Number(next.sessionTime || 0)));
+  next.totalPlaytime = Math.max(0, Math.floor(Number(next.totalPlaytime || 0)));
+  next.dailyPlaytime = Math.max(0, Math.floor(Number(next.dailyPlaytime || 0)));
+  next.weeklyPlaytime = Math.max(0, Math.floor(Number(next.weeklyPlaytime || 0)));
+  next.lastJoin = Math.max(0, Number(next.lastJoin || 0));
+  next.counterUpdatedAt = Math.max(0, Number(next.counterUpdatedAt || Date.now()));
+
+  return next;
 }
 
 function buildPlayersSignature(players) {
@@ -779,10 +832,11 @@ function updatePlayerCard(card, player) {
   }
 }
 
-function getLivePlayerCounters(player, nowPerf) {
-  const isActive = String(player.status || '').toLowerCase() === 'online' && !player.isAFK;
+function getLivePlayerCounters(player, nowMsValue) {
+  const isActive = Boolean(player.online ?? String(player.status || '').toLowerCase() === 'online') && !player.isAFK;
+  const anchor = Math.max(0, Number(player.counterUpdatedAt || state.lastSnapshotUpdateAt || nowMsValue));
   const elapsed = isActive
-    ? Math.max(0, (nowPerf - Number(player.counterUpdatedPerf || nowPerf)) / 1000)
+    ? Math.max(0, (nowMsValue - anchor) / 1000)
     : 0;
 
   return {
@@ -794,13 +848,15 @@ function getLivePlayerCounters(player, nowPerf) {
 }
 
 function animatePlayerCounters(nowPerf) {
+  const nowMsValue = Date.now();
+
   state.players.forEach((player) => {
     const card = state.playerNodeMap.get(player.key);
     if (!card) {
       return;
     }
 
-    const counters = getLivePlayerCounters(player, nowPerf);
+    const counters = getLivePlayerCounters(player, nowMsValue);
     const pills = card.querySelectorAll('.meta-pill');
 
     if (pills[1]) pills[1].textContent = `Session: ${formatUptime(counters.session)}`;
@@ -877,9 +933,9 @@ function upsertPlayerFromRealtime(payload) {
 
   const index = state.players.findIndex((player) => player.key === normalized.key);
   if (index >= 0) {
-    state.players[index] = { ...state.players[index], ...normalized };
+    state.players[index] = mergePlayerState(state.players[index], normalized);
   } else {
-    state.players.push(normalized);
+    state.players.push(mergePlayerState(null, normalized));
   }
 
   renderPlayers(state.players);
@@ -1113,7 +1169,7 @@ function renderSnapshot(snapshot) {
   setChartOpacity(status !== 'Online');
 
   state.players = Array.isArray(snapshot.playerList)
-    ? snapshot.playerList.map(normalizePlayer).filter(Boolean)
+    ? snapshot.playerList.map(normalizePlayer).filter(Boolean).map((player) => mergePlayerState(null, player))
     : [];
 
   renderPlayers(state.players);
@@ -1203,7 +1259,8 @@ async function fetchPlayers() {
     const payload = await response.json();
     const items = (Array.isArray(payload?.items) ? payload.items : [])
       .map(normalizePlayer)
-      .filter(Boolean);
+      .filter(Boolean)
+      .map((player) => mergePlayerState(null, player));
 
     state.players = items;
     renderPlayers(state.players);
@@ -1249,6 +1306,9 @@ function attachRealtimeBindings(channel) {
       name: event?.username || event?.name,
       uuid: event?.uuid,
       avatarUrl: event?.avatarUrl,
+      online: event?.online,
+      lastJoin: event?.lastJoin,
+      counterUpdatedAt: event?.counterUpdatedAt,
       ping: event?.ping,
       status: 'online',
       isAFK: Boolean(event?.isAFK),
@@ -1271,6 +1331,9 @@ function attachRealtimeBindings(channel) {
       name: event?.username || event?.name,
       uuid: event?.uuid,
       avatarUrl: event?.avatarUrl,
+      online: event?.online,
+      lastJoin: event?.lastJoin,
+      counterUpdatedAt: event?.counterUpdatedAt,
       ping: event?.ping,
       status: event?.status,
       isAFK: Boolean(event?.isAFK),
@@ -1359,7 +1422,12 @@ function uiAnimationLoop(nowPerf) {
   }
 
   renderAnimatedStats(nowPerf);
-  animatePlayerCounters(nowPerf);
+
+  if (!state.lastPlayerTickAt || nowPerf - state.lastPlayerTickAt >= 1000) {
+    state.lastPlayerTickAt = nowPerf;
+    animatePlayerCounters(nowPerf);
+  }
+
   animateChartTowardsTarget(nowPerf);
   streamAnimatedChart(nowPerf);
 

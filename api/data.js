@@ -234,10 +234,14 @@ function cloneSnapshot(snapshot) {
     playerList: Array.isArray(snapshot.playerList)
       ? snapshot.playerList.map((player) => ({
           name: String(player?.name || '').trim(),
+          username: String(player?.username || player?.name || '').trim(),
           uuid: String(player?.uuid || player?.id || '').trim(),
           avatarUrl: String(player?.avatarUrl || buildAvatarUrl(player?.uuid, 64) || '').trim(),
           ping: normalizeNumber(player?.ping, 0),
           status: String(player?.status || 'online').trim() || 'online',
+          online: Boolean(player?.online ?? String(player?.status || '').toLowerCase() === 'online'),
+          lastJoin: normalizeNumber(player?.lastJoin, 0),
+          counterUpdatedAt: normalizeNumber(player?.counterUpdatedAt, 0),
           isAFK: Boolean(player?.isAFK),
           sessionTime: normalizeNumber(player?.sessionTime, 0),
           totalPlaytime: normalizeNumber(player?.totalPlaytime, 0),
@@ -256,6 +260,10 @@ function enrichPlayersWithStats(players, records, timestamp) {
     if (!record) {
       return {
         ...player,
+        username: player.name,
+        online: String(player?.status || '').toLowerCase() !== 'offline',
+        lastJoin: 0,
+        counterUpdatedAt: timestamp,
         isAFK: false,
         sessionTime: 0,
         totalPlaytime: 0,
@@ -267,6 +275,10 @@ function enrichPlayersWithStats(players, records, timestamp) {
     const counters = attachLiveCounters(record, timestamp);
     return {
       ...player,
+      username: record.name || player.name,
+      online: Boolean(record.isOnline),
+      lastJoin: Number(record.joinTime || 0),
+      counterUpdatedAt: Number(counters.counterUpdatedAt || timestamp),
       isAFK: Boolean(record.isAFK),
       sessionTime: counters.sessionTime,
       totalPlaytime: counters.totalPlaytime,
@@ -367,6 +379,10 @@ function updatePlayerRecords(playersState, players, timestamp) {
     return {
       ...player,
         avatarUrl: record.avatarUrl || player.avatarUrl || buildAvatarUrl(record.uuid, 64),
+      username: record.name || player.name,
+      online: Boolean(record.isOnline),
+      lastJoin: Number(record.joinTime || 0),
+      counterUpdatedAt: Number(counters.counterUpdatedAt || timestamp),
       status: record.isOnline ? 'online' : 'offline',
       isAFK: Boolean(record.isAFK),
       sessionTime: counters.sessionTime,
@@ -467,6 +483,9 @@ async function storeSnapshot(snapshot) {
     await publishRealtimeEvent('player_join', {
       uuid: player.uuid || '',
       username: player.name || '',
+      online: true,
+      lastJoin: Number(player.lastJoin || result.timestamp),
+      counterUpdatedAt: Number(player.counterUpdatedAt || result.timestamp),
       playtime: Number(player.totalPlaytime || 0),
       ping: Number(player.ping || 0),
       isAFK: Boolean(player.isAFK),
@@ -488,6 +507,9 @@ async function storeSnapshot(snapshot) {
     await publishRealtimeEvent('player_update', {
       uuid: player.uuid || '',
       username: player.name || '',
+      online: Boolean(player.online ?? String(player.status || '').toLowerCase() === 'online'),
+      lastJoin: Number(player.lastJoin || 0),
+      counterUpdatedAt: Number(player.counterUpdatedAt || result.timestamp),
       playtime: Number(player.totalPlaytime || 0),
       ping: Number(player.ping || 0),
       isAFK: Boolean(player.isAFK),

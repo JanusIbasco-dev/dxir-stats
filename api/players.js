@@ -25,6 +25,11 @@ function enrichPlayers(players, playerRecords, timestamp) {
 
     return {
       ...player,
+      username: String(record.name || player.name || player.username || ''),
+      uuid: String(record.uuid || player.uuid || ''),
+      online: Boolean(record.isOnline),
+      lastJoin: Number(record.joinTime || 0),
+      counterUpdatedAt: Number(counters.counterUpdatedAt || timestamp),
       status: record.isOnline ? 'online' : 'offline',
       isAFK: Boolean(record.isAFK),
       sessionTime: counters.sessionTime,
