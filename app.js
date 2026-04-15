@@ -2,6 +2,7 @@ const FALLBACK_REFRESH_MS = 15000;
 const AUTO_FETCH_MS = 2000;
 const OFFLINE_THRESHOLD_MS = 8000;
 const THEME_STORAGE_KEY = 'dxir-theme';
+const CHART_STREAM_MS = 120;
 
 const state = {
   hasData: false,
@@ -14,7 +15,7 @@ const state = {
   realtimeChannel: null,
   chart: null,
   chartResizeTimer: null,
-  maxPoints: 50,
+  maxPoints: 140,
   lastSeenUpdate: 0,
   lastFreshAt: 0,
   lastChartSignature: '',
@@ -56,6 +57,8 @@ const state = {
     ram: 0,
   },
   chartLastUpdateKey: 0,
+  chartStreamAccumulator: 0,
+  lastSnapshotUpdateAt: 0,
   playerTransitionTimers: new Map(),
   autoFetchTimer: 0,
 };
@@ -136,6 +139,23 @@ function lerp(current, target, factor) {
 function formatStatNumber(value, digits = 1) {
   const amount = Number(value || 0);
   return amount.toFixed(digits);
+}
+
+function getCPUColor(cpu) {
+  if (cpu < 50) return '#22c55e';
+  if (cpu < 80) return '#eab308';
+  return '#ef4444';
+}
+
+function getRAMColor(ramPercent) {
+  if (ramPercent < 50) return '#22c55e';
+  if (ramPercent < 80) return '#eab308';
+  return '#ef4444';
+}
+
+function getTimeAgoLabel(timestampMs) {
+  const diffSeconds = Math.max(0, Math.floor((Date.now() - Number(timestampMs || 0)) / 1000));
+  return diffSeconds <= 1 ? 'just now' : `${diffSeconds}s ago`;
 }
 
 function getThemeFromStorage() {
@@ -423,6 +443,40 @@ function animateChartTowardsTarget(nowPerf) {
 
   state.chart.data.datasets[0].data[lastIndex] = chartState.cpuData[lastIndex];
   state.chart.data.datasets[1].data[lastIndex] = chartState.ramData[lastIndex];
+  state.chart.update('none');
+}
+
+function streamAnimatedChart(nowPerf) {
+  if (!state.chart || !state.currentSnapshot) {
+    return;
+  }
+
+  state.chartStreamAccumulator += Math.max(0, nowPerf - state.lastUiFrameAt);
+  if (state.chartStreamAccumulator < CHART_STREAM_MS) {
+    return;
+  }
+
+  state.chartStreamAccumulator -= CHART_STREAM_MS;
+
+  const streamLabel = new Date().toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+
+  chartState.labels.push(streamLabel);
+  chartState.cpuData.push(Number(state.animatedStats.cpu || 0));
+  chartState.ramData.push(Number(state.animatedStats.ramUsed || 0));
+
+  if (chartState.labels.length > state.maxPoints) {
+    chartState.labels.shift();
+    chartState.cpuData.shift();
+    chartState.ramData.shift();
+  }
+
+  state.chart.data.labels = [...chartState.labels];
+  state.chart.data.datasets[0].data = [...chartState.cpuData];
+  state.chart.data.datasets[1].data = [...chartState.ramData];
   state.chart.update('none');
 }
 
@@ -966,6 +1020,7 @@ function setupLeaderboardLazyLoad() {
 function renderLoading() {
   state.hasData = false;
   state.currentSnapshot = null;
+  state.lastSnapshotUpdateAt = 0;
   state.targetStats.uptimeReceivedPerf = performance.now();
   setConnectionState('loading', 'Connecting');
   setChartOpacity(false);
@@ -1047,9 +1102,14 @@ function renderAnimatedStats(nowPerf) {
   }
   if (elements.cpuValue) {
     elements.cpuValue.textContent = `${formatStatNumber(state.animatedStats.cpu, 1)}%`;
+    elements.cpuValue.style.color = getCPUColor(state.animatedStats.cpu);
   }
   if (elements.ramValue) {
     elements.ramValue.textContent = `${formatStatNumber(state.animatedStats.ramUsed, 2)} / ${formatStatNumber(state.animatedStats.ramMax, 2)} GB`;
+    const ramPercent = state.animatedStats.ramMax > 0
+      ? (state.animatedStats.ramUsed / state.animatedStats.ramMax) * 100
+      : 0;
+    elements.ramValue.style.color = getRAMColor(ramPercent);
   }
 
   const playerCount = Math.max(0, Math.round(state.animatedStats.players));
@@ -1058,6 +1118,14 @@ function renderAnimatedStats(nowPerf) {
   }
   if (elements.playersCountMirror) {
     elements.playersCountMirror.textContent = String(playerCount);
+  }
+
+  if (elements.timeValue && state.lastSnapshotUpdateAt > 0) {
+    elements.timeValue.textContent = getTimeAgoLabel(state.lastSnapshotUpdateAt);
+  }
+
+  if (elements.apiMessage && state.lastSnapshotUpdateAt > 0 && state.currentSnapshot?.status === 'online') {
+    elements.apiMessage.textContent = `Updated ${getTimeAgoLabel(state.lastSnapshotUpdateAt)}`;
   }
 }
 
@@ -1069,6 +1137,7 @@ function renderSnapshot(snapshot) {
     ...snapshot,
     status: status.toLowerCase(),
   };
+  state.lastSnapshotUpdateAt = Number(snapshot.lastUpdate || Date.now());
 
   if (elements.serverIpValue) elements.serverIpValue.textContent = normalizeString(snapshot.ip, 'dxir.live');
 
@@ -1077,9 +1146,9 @@ function renderSnapshot(snapshot) {
     elements.serverValue.dataset.state = status.toLowerCase();
   }
 
-  if (elements.timeValue) elements.timeValue.textContent = normalizeString(snapshot.time, '--');
+  if (elements.timeValue) elements.timeValue.textContent = getTimeAgoLabel(state.lastSnapshotUpdateAt);
   if (elements.apiMessage) {
-    elements.apiMessage.textContent = `Live data received ${formatElapsed(Date.now() - Number(snapshot.lastUpdate || Date.now()))}.`;
+    elements.apiMessage.textContent = `Updated ${getTimeAgoLabel(state.lastSnapshotUpdateAt)}`;
   }
 
   setConnectionState(status.toLowerCase(), status);
@@ -1127,7 +1196,7 @@ function renderData(payload, source = 'api') {
   }
 
   if (elements.apiMessage && source === 'realtime') {
-    elements.apiMessage.textContent = 'Live stream update received just now.';
+    elements.apiMessage.textContent = 'Updated just now';
   }
 }
 
@@ -1366,6 +1435,7 @@ function uiAnimationLoop(nowPerf) {
   renderAnimatedStats(nowPerf);
   animatePlayerCounters(nowPerf);
   animateChartTowardsTarget(nowPerf);
+  streamAnimatedChart(nowPerf);
 
   if (nowPerf - state.lastStaleCheckAt >= 1000) {
     state.lastStaleCheckAt = nowPerf;
