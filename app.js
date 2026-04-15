@@ -77,6 +77,16 @@ const elements = {
   serverValue: document.getElementById('serverValue'),
   timeValue: document.getElementById('timeValue'),
   apiMessage: document.getElementById('apiMessage'),
+  healthOverall: document.getElementById('healthOverall'),
+  healthOverallText: document.getElementById('healthOverallText'),
+  healthCpu: document.getElementById('healthCpu'),
+  healthCpuValue: document.getElementById('healthCpuValue'),
+  healthCpuMeta: document.getElementById('healthCpuMeta'),
+  healthRam: document.getElementById('healthRam'),
+  healthRamValue: document.getElementById('healthRamValue'),
+  healthRamMeta: document.getElementById('healthRamMeta'),
+  healthPlayers: document.getElementById('healthPlayers'),
+  healthPlayersValue: document.getElementById('healthPlayersValue'),
   playerList: document.getElementById('playerList'),
   chartCanvas: document.getElementById('usageChart'),
   chartCard: document.querySelector('.chart-card'),
@@ -156,6 +166,32 @@ function getRAMColor(ramPercent) {
 function getTimeAgoLabel(timestampMs) {
   const diffSeconds = Math.max(0, Math.floor((Date.now() - Number(timestampMs || 0)) / 1000));
   return diffSeconds <= 1 ? 'just now' : `${diffSeconds}s ago`;
+}
+
+function getUsageState(valuePercent) {
+  if (valuePercent < 50) return 'good';
+  if (valuePercent < 80) return 'warning';
+  return 'critical';
+}
+
+function getCpuLabel(valuePercent) {
+  if (valuePercent < 50) return 'Low';
+  if (valuePercent < 80) return 'Medium';
+  return 'High';
+}
+
+function getRamLabel(valuePercent) {
+  if (valuePercent < 50) return 'Stable';
+  if (valuePercent < 80) return 'Heavy';
+  return 'Critical';
+}
+
+function getOverallHealth(cpuPercent, ramPercent) {
+  const score = Math.max(cpuPercent, ramPercent);
+  if (score < 35) return { state: 'excellent', text: 'Excellent' };
+  if (score < 50) return { state: 'good', text: 'Good' };
+  if (score < 80) return { state: 'warning', text: 'Warning' };
+  return { state: 'critical', text: 'Critical' };
 }
 
 function getThemeFromStorage() {
@@ -1112,6 +1148,43 @@ function renderAnimatedStats(nowPerf) {
     elements.ramValue.style.color = getRAMColor(ramPercent);
   }
 
+  const cpuPercent = clampNumber(state.animatedStats.cpu, 0, 100);
+  const ramPercent = state.animatedStats.ramMax > 0
+    ? clampNumber((state.animatedStats.ramUsed / state.animatedStats.ramMax) * 100, 0, 100)
+    : 0;
+  const overall = getOverallHealth(cpuPercent, ramPercent);
+
+  if (elements.healthOverall) {
+    elements.healthOverall.dataset.state = overall.state;
+  }
+  if (elements.healthOverallText) {
+    elements.healthOverallText.textContent = overall.text;
+  }
+
+  if (elements.healthCpu) {
+    elements.healthCpu.dataset.state = getUsageState(cpuPercent);
+  }
+  if (elements.healthCpuValue) {
+    elements.healthCpuValue.textContent = `${formatStatNumber(cpuPercent, 1)}%`;
+  }
+  if (elements.healthCpuMeta) {
+    elements.healthCpuMeta.textContent = getCpuLabel(cpuPercent);
+  }
+
+  if (elements.healthRam) {
+    elements.healthRam.dataset.state = getUsageState(ramPercent);
+  }
+  if (elements.healthRamValue) {
+    elements.healthRamValue.textContent = `${formatStatNumber(state.animatedStats.ramUsed, 2)} / ${formatStatNumber(state.animatedStats.ramMax, 2)} GB`;
+  }
+  if (elements.healthRamMeta) {
+    elements.healthRamMeta.textContent = getRamLabel(ramPercent);
+  }
+
+  if (elements.healthPlayersValue) {
+    elements.healthPlayersValue.textContent = String(playerCount);
+  }
+
   const playerCount = Math.max(0, Math.round(state.animatedStats.players));
   if (elements.playersValue) {
     elements.playersValue.textContent = String(playerCount);
@@ -1127,6 +1200,10 @@ function renderAnimatedStats(nowPerf) {
   if (elements.apiMessage && state.lastSnapshotUpdateAt > 0 && state.currentSnapshot?.status === 'online') {
     elements.apiMessage.textContent = `Updated ${getTimeAgoLabel(state.lastSnapshotUpdateAt)}`;
   }
+}
+
+function clampNumber(value, min, max) {
+  return Math.max(min, Math.min(max, Number(value || 0)));
 }
 
 function renderSnapshot(snapshot) {

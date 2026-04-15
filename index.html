@@ -140,17 +140,42 @@
           <article class="card dashboard-card chart-card">
             <div class="card-head">
               <div class="chart-head-left">
-                <p class="stat-kicker">Live Chart</p>
-                <h2 class="stat-title">CPU and RAM Trends</h2>
+                <p class="stat-kicker">Server Health</p>
+                <h2 class="stat-title">Real-time system status</h2>
               </div>
-              <div class="chart-head-actions">
-                <span class="chart-note">Live stream</span>
-                <a class="chart-expand" href="/analytics" aria-label="View full analytics graph">View Full Graph</a>
+              <div class="health-overall" id="healthOverall" data-state="loading">
+                <span class="health-overall__dot"></span>
+                <span id="healthOverallText">Waiting...</span>
               </div>
             </div>
 
-            <div class="chart-wrap">
-              <canvas id="usageChart" aria-label="CPU and RAM usage chart" role="img"></canvas>
+            <div class="health-grid" aria-live="polite">
+              <div class="health-item" id="healthCpu" data-state="loading">
+                <span class="health-item__icon" aria-hidden="true">⚙️</span>
+                <div class="health-item__body">
+                  <span class="health-item__label">CPU</span>
+                  <strong class="health-item__value" id="healthCpuValue">--</strong>
+                  <span class="health-item__meta" id="healthCpuMeta">--</span>
+                </div>
+              </div>
+
+              <div class="health-item" id="healthRam" data-state="loading">
+                <span class="health-item__icon" aria-hidden="true">💾</span>
+                <div class="health-item__body">
+                  <span class="health-item__label">RAM</span>
+                  <strong class="health-item__value" id="healthRamValue">--</strong>
+                  <span class="health-item__meta" id="healthRamMeta">--</span>
+                </div>
+              </div>
+
+              <div class="health-item" id="healthPlayers" data-state="loading">
+                <span class="health-item__icon" aria-hidden="true">👥</span>
+                <div class="health-item__body">
+                  <span class="health-item__label">Players</span>
+                  <strong class="health-item__value" id="healthPlayersValue">--</strong>
+                  <span class="health-item__meta">Current online count</span>
+                </div>
+              </div>
             </div>
           </article>
         </section>

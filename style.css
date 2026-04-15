@@ -723,6 +723,123 @@ body.sidebar-open .sidebar-overlay {
   opacity: 0.6;
 }
 
+.health-overall {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.24);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.health-overall__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--primary-light);
+}
+
+.health-overall[data-state="excellent"],
+.health-overall[data-state="good"] {
+  color: #22c55e;
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.health-overall[data-state="excellent"] .health-overall__dot,
+.health-overall[data-state="good"] .health-overall__dot {
+  background: #22c55e;
+}
+
+.health-overall[data-state="warning"] {
+  color: #eab308;
+  border-color: rgba(234, 179, 8, 0.35);
+}
+
+.health-overall[data-state="warning"] .health-overall__dot {
+  background: #eab308;
+}
+
+.health-overall[data-state="critical"] {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.health-overall[data-state="critical"] .health-overall__dot {
+  background: #ef4444;
+}
+
+.health-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+@media (min-width: 768px) {
+  .health-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+  }
+}
+
+.health-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.22);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.health-item__icon {
+  font-size: 18px;
+  width: 22px;
+  text-align: center;
+}
+
+.health-item__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.health-item__label {
+  font-size: 12px;
+  opacity: 0.72;
+}
+
+.health-item__value {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.health-item__meta {
+  font-size: 12px;
+  opacity: 0.65;
+}
+
+.health-item[data-state="good"] {
+  border-color: rgba(34, 197, 94, 0.32);
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.12);
+}
+
+.health-item[data-state="warning"] {
+  border-color: rgba(234, 179, 8, 0.32);
+  box-shadow: 0 0 10px rgba(234, 179, 8, 0.12);
+}
+
+.health-item[data-state="critical"] {
+  border-color: rgba(239, 68, 68, 0.34);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.14);
+}
+
 .chart-head-actions {
   display: inline-flex;
   align-items: center;
