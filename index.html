@@ -140,7 +140,7 @@
           <article class="card dashboard-card chart-card">
             <div class="card-head">
               <div class="chart-head-left">
-                <p class="stat-kicker">Server Health</p>
+                <p class="stat-kicker">System Status</p>
                 <h2 class="stat-title">Real-time system status</h2>
               </div>
               <div class="health-overall" id="healthOverall" data-state="loading">
@@ -150,31 +150,24 @@
             </div>
 
             <div class="health-grid" aria-live="polite">
-              <div class="health-item" id="healthCpu" data-state="loading">
-                <span class="health-item__icon" aria-hidden="true">⚙️</span>
-                <div class="health-item__body">
-                  <span class="health-item__label">CPU</span>
-                  <strong class="health-item__value" id="healthCpuValue">--</strong>
-                  <span class="health-item__meta" id="healthCpuMeta">--</span>
-                </div>
+              <div class="health-line" id="healthStateLine" data-state="loading">
+                <span class="health-line__icon" aria-hidden="true">●</span>
+                <span class="health-line__text" id="healthStateText">All systems operational</span>
               </div>
 
-              <div class="health-item" id="healthRam" data-state="loading">
-                <span class="health-item__icon" aria-hidden="true">💾</span>
-                <div class="health-item__body">
-                  <span class="health-item__label">RAM</span>
-                  <strong class="health-item__value" id="healthRamValue">--</strong>
-                  <span class="health-item__meta" id="healthRamMeta">--</span>
-                </div>
+              <div class="health-line" id="healthResourceLine" data-state="loading">
+                <span class="health-line__icon" aria-hidden="true">●</span>
+                <span class="health-line__text" id="healthResourceText">Resource usage is low</span>
               </div>
 
-              <div class="health-item" id="healthPlayers" data-state="loading">
-                <span class="health-item__icon" aria-hidden="true">👥</span>
-                <div class="health-item__body">
-                  <span class="health-item__label">Players</span>
-                  <strong class="health-item__value" id="healthPlayersValue">--</strong>
-                  <span class="health-item__meta">Current online count</span>
-                </div>
+              <div class="health-line" id="healthUptimeLine" data-state="good">
+                <span class="health-line__icon" aria-hidden="true">●</span>
+                <span class="health-line__text" id="healthUptimeText">Uptime stable (--)</span>
+              </div>
+
+              <div class="health-line" id="healthRecommendationLine" data-state="loading">
+                <span class="health-line__icon" aria-hidden="true">●</span>
+                <span class="health-line__text" id="healthRecommendationText">No action required</span>
               </div>
             </div>
           </article>

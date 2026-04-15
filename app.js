@@ -79,14 +79,14 @@ const elements = {
   apiMessage: document.getElementById('apiMessage'),
   healthOverall: document.getElementById('healthOverall'),
   healthOverallText: document.getElementById('healthOverallText'),
-  healthCpu: document.getElementById('healthCpu'),
-  healthCpuValue: document.getElementById('healthCpuValue'),
-  healthCpuMeta: document.getElementById('healthCpuMeta'),
-  healthRam: document.getElementById('healthRam'),
-  healthRamValue: document.getElementById('healthRamValue'),
-  healthRamMeta: document.getElementById('healthRamMeta'),
-  healthPlayers: document.getElementById('healthPlayers'),
-  healthPlayersValue: document.getElementById('healthPlayersValue'),
+  healthStateLine: document.getElementById('healthStateLine'),
+  healthStateText: document.getElementById('healthStateText'),
+  healthResourceLine: document.getElementById('healthResourceLine'),
+  healthResourceText: document.getElementById('healthResourceText'),
+  healthUptimeLine: document.getElementById('healthUptimeLine'),
+  healthUptimeText: document.getElementById('healthUptimeText'),
+  healthRecommendationLine: document.getElementById('healthRecommendationLine'),
+  healthRecommendationText: document.getElementById('healthRecommendationText'),
   playerList: document.getElementById('playerList'),
   chartCanvas: document.getElementById('usageChart'),
   chartCard: document.querySelector('.chart-card'),
@@ -174,24 +174,27 @@ function getUsageState(valuePercent) {
   return 'critical';
 }
 
-function getCpuLabel(valuePercent) {
-  if (valuePercent < 50) return 'Low';
-  if (valuePercent < 80) return 'Medium';
-  return 'High';
-}
-
-function getRamLabel(valuePercent) {
-  if (valuePercent < 50) return 'Stable';
-  if (valuePercent < 80) return 'Heavy';
-  return 'Critical';
-}
-
 function getOverallHealth(cpuPercent, ramPercent) {
-  const score = Math.max(cpuPercent, ramPercent);
-  if (score < 35) return { state: 'excellent', text: 'Excellent' };
-  if (score < 50) return { state: 'good', text: 'Good' };
-  if (score < 80) return { state: 'warning', text: 'Warning' };
+  if (cpuPercent > 80 || ramPercent > 80) {
+    return { state: 'critical', text: 'Critical' };
+  }
+
+  if ((cpuPercent >= 50 && cpuPercent <= 80) || (ramPercent >= 50 && ramPercent <= 80)) {
+    return { state: 'warning', text: 'Warning' };
+  }
+
+  if (cpuPercent < 50 && ramPercent < 50) {
+    return { state: 'excellent', text: 'Excellent' };
+  }
+
   return { state: 'critical', text: 'Critical' };
+}
+
+function formatUptimeCompact(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds || 0)));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  return `${hours}h ${minutes}m`;
 }
 
 function getThemeFromStorage() {
@@ -1161,36 +1164,58 @@ function renderAnimatedStats(nowPerf) {
     elements.healthOverallText.textContent = overall.text;
   }
 
-  if (elements.healthCpu) {
-    elements.healthCpu.dataset.state = getUsageState(cpuPercent);
-  }
-  if (elements.healthCpuValue) {
-    elements.healthCpuValue.textContent = `${formatStatNumber(cpuPercent, 1)}%`;
-  }
-  if (elements.healthCpuMeta) {
-    elements.healthCpuMeta.textContent = getCpuLabel(cpuPercent);
-  }
-
-  if (elements.healthRam) {
-    elements.healthRam.dataset.state = getUsageState(ramPercent);
-  }
-  if (elements.healthRamValue) {
-    elements.healthRamValue.textContent = `${formatStatNumber(state.animatedStats.ramUsed, 2)} / ${formatStatNumber(state.animatedStats.ramMax, 2)} GB`;
-  }
-  if (elements.healthRamMeta) {
-    elements.healthRamMeta.textContent = getRamLabel(ramPercent);
-  }
-
-  if (elements.healthPlayersValue) {
-    elements.healthPlayersValue.textContent = String(playerCount);
-  }
-
   const playerCount = Math.max(0, Math.round(state.animatedStats.players));
   if (elements.playersValue) {
     elements.playersValue.textContent = String(playerCount);
   }
   if (elements.playersCountMirror) {
     elements.playersCountMirror.textContent = String(playerCount);
+  }
+
+  if (elements.healthStateLine) {
+    elements.healthStateLine.dataset.state = overall.state;
+  }
+  if (elements.healthStateText) {
+    if (overall.state === 'excellent') {
+      elements.healthStateText.textContent = 'All systems operational';
+    } else if (overall.state === 'warning') {
+      elements.healthStateText.textContent = 'System under moderate load';
+    } else {
+      elements.healthStateText.textContent = 'High system load detected';
+    }
+  }
+
+  if (elements.healthResourceLine) {
+    elements.healthResourceLine.dataset.state = overall.state;
+  }
+  if (elements.healthResourceText) {
+    if (overall.state === 'excellent') {
+      elements.healthResourceText.textContent = 'Resource usage is low';
+    } else if (overall.state === 'warning') {
+      elements.healthResourceText.textContent = 'Memory usage increasing';
+    } else {
+      elements.healthResourceText.textContent = 'CPU usage high';
+    }
+  }
+
+  if (elements.healthUptimeLine) {
+    elements.healthUptimeLine.dataset.state = overall.state;
+  }
+  if (elements.healthUptimeText) {
+    elements.healthUptimeText.textContent = `Uptime stable (${formatUptimeCompact(uptimeSeconds)})`;
+  }
+
+  if (elements.healthRecommendationLine) {
+    elements.healthRecommendationLine.dataset.state = overall.state;
+  }
+  if (elements.healthRecommendationText) {
+    if (overall.state === 'excellent') {
+      elements.healthRecommendationText.textContent = 'No action required';
+    } else if (overall.state === 'warning') {
+      elements.healthRecommendationText.textContent = 'Monitor resource usage';
+    } else {
+      elements.healthRecommendationText.textContent = 'Immediate attention required';
+    }
   }
 
   if (elements.timeValue && state.lastSnapshotUpdateAt > 0) {
