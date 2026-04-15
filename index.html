@@ -142,6 +142,7 @@
               <div class="chart-head-left">
                 <p class="stat-kicker">System Status</p>
                 <h2 class="stat-title">Real-time system status</h2>
+                <p class="health-subtitle" id="healthSubtitle">System running smoothly</p>
               </div>
               <div class="health-overall" id="healthOverall" data-state="loading">
                 <span class="health-overall__dot"></span>
@@ -150,23 +151,23 @@
             </div>
 
             <div class="health-grid" aria-live="polite">
-              <div class="health-line" id="healthStateLine" data-state="loading">
+              <div class="health-line health-line--primary" id="healthStateLine" data-state="loading">
                 <span class="health-line__icon" aria-hidden="true">●</span>
                 <span class="health-line__text" id="healthStateText">All systems operational</span>
               </div>
 
               <div class="health-line" id="healthResourceLine" data-state="loading">
-                <span class="health-line__icon" aria-hidden="true">●</span>
+                <span class="health-line__icon" aria-hidden="true">⚡</span>
                 <span class="health-line__text" id="healthResourceText">Resource usage is low</span>
               </div>
 
               <div class="health-line" id="healthUptimeLine" data-state="good">
-                <span class="health-line__icon" aria-hidden="true">●</span>
+                <span class="health-line__icon" aria-hidden="true">⏱</span>
                 <span class="health-line__text" id="healthUptimeText">Uptime stable (--)</span>
               </div>
 
               <div class="health-line" id="healthRecommendationLine" data-state="loading">
-                <span class="health-line__icon" aria-hidden="true">●</span>
+                <span class="health-line__icon" aria-hidden="true">✓</span>
                 <span class="health-line__text" id="healthRecommendationText">No action required</span>
               </div>
             </div>

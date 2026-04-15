@@ -79,6 +79,7 @@ const elements = {
   apiMessage: document.getElementById('apiMessage'),
   healthOverall: document.getElementById('healthOverall'),
   healthOverallText: document.getElementById('healthOverallText'),
+  healthSubtitle: document.getElementById('healthSubtitle'),
   healthStateLine: document.getElementById('healthStateLine'),
   healthStateText: document.getElementById('healthStateText'),
   healthResourceLine: document.getElementById('healthResourceLine'),
@@ -97,6 +98,17 @@ const elements = {
     earnings: document.getElementById('earningsLeaderboardList'),
   },
 };
+
+function setAnimatedText(element, nextText) {
+  if (!element || element.textContent === nextText) {
+    return;
+  }
+
+  element.textContent = nextText;
+  element.classList.remove('is-updating');
+  void element.offsetWidth;
+  element.classList.add('is-updating');
+}
 
 const chartState = {
   labels: [],
@@ -1161,7 +1173,16 @@ function renderAnimatedStats(nowPerf) {
     elements.healthOverall.dataset.state = overall.state;
   }
   if (elements.healthOverallText) {
-    elements.healthOverallText.textContent = overall.text;
+    setAnimatedText(elements.healthOverallText, overall.text);
+  }
+  if (elements.healthSubtitle) {
+    if (overall.state === 'excellent' || overall.state === 'good') {
+      setAnimatedText(elements.healthSubtitle, 'System running smoothly');
+    } else if (overall.state === 'warning') {
+      setAnimatedText(elements.healthSubtitle, 'Resource pressure detected');
+    } else {
+      setAnimatedText(elements.healthSubtitle, 'Performance needs attention');
+    }
   }
 
   const playerCount = Math.max(0, Math.round(state.animatedStats.players));
@@ -1177,11 +1198,11 @@ function renderAnimatedStats(nowPerf) {
   }
   if (elements.healthStateText) {
     if (overall.state === 'excellent') {
-      elements.healthStateText.textContent = 'All systems operational';
+      setAnimatedText(elements.healthStateText, 'All systems operational');
     } else if (overall.state === 'warning') {
-      elements.healthStateText.textContent = 'System under moderate load';
+      setAnimatedText(elements.healthStateText, 'System under moderate load');
     } else {
-      elements.healthStateText.textContent = 'High system load detected';
+      setAnimatedText(elements.healthStateText, 'High system load detected');
     }
   }
 
@@ -1190,11 +1211,11 @@ function renderAnimatedStats(nowPerf) {
   }
   if (elements.healthResourceText) {
     if (overall.state === 'excellent') {
-      elements.healthResourceText.textContent = 'Resource usage is low';
+      setAnimatedText(elements.healthResourceText, 'Resource usage is low');
     } else if (overall.state === 'warning') {
-      elements.healthResourceText.textContent = 'Memory usage increasing';
+      setAnimatedText(elements.healthResourceText, 'Memory usage increasing');
     } else {
-      elements.healthResourceText.textContent = 'CPU usage high';
+      setAnimatedText(elements.healthResourceText, 'CPU usage high');
     }
   }
 
@@ -1202,7 +1223,7 @@ function renderAnimatedStats(nowPerf) {
     elements.healthUptimeLine.dataset.state = overall.state;
   }
   if (elements.healthUptimeText) {
-    elements.healthUptimeText.textContent = `Uptime stable (${formatUptimeCompact(uptimeSeconds)})`;
+    setAnimatedText(elements.healthUptimeText, `Uptime stable (${formatUptimeCompact(uptimeSeconds)})`);
   }
 
   if (elements.healthRecommendationLine) {
@@ -1210,11 +1231,11 @@ function renderAnimatedStats(nowPerf) {
   }
   if (elements.healthRecommendationText) {
     if (overall.state === 'excellent') {
-      elements.healthRecommendationText.textContent = 'No action required';
+      setAnimatedText(elements.healthRecommendationText, 'No action required');
     } else if (overall.state === 'warning') {
-      elements.healthRecommendationText.textContent = 'Monitor resource usage';
+      setAnimatedText(elements.healthRecommendationText, 'Monitor resource usage');
     } else {
-      elements.healthRecommendationText.textContent = 'Immediate attention required';
+      setAnimatedText(elements.healthRecommendationText, 'Immediate attention required');
     }
   }
 
