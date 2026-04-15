@@ -41,6 +41,7 @@ function createEmptyState() {
     history: [],
     players: {},
     uuidDirectory: {},
+    avatarDirectory: {},
     leaderboards: {
       kills: { items: [], updatedAt: 0 },
       balance: { items: [], updatedAt: 0 },
@@ -63,6 +64,7 @@ function parseState(value) {
     ...value,
     players: value.players && typeof value.players === 'object' ? value.players : {},
     uuidDirectory: value.uuidDirectory && typeof value.uuidDirectory === 'object' ? value.uuidDirectory : {},
+    avatarDirectory: value.avatarDirectory && typeof value.avatarDirectory === 'object' ? value.avatarDirectory : {},
     history: Array.isArray(value.history) ? value.history : [],
     leaderboards: {
       ...base.leaderboards,
@@ -71,7 +73,100 @@ function parseState(value) {
   };
 
   safe.history = safe.history.slice(-HISTORY_LIMIT);
+
+  // Backward-compatible migration for old username->uuid string caches.
+  Object.keys(safe.uuidDirectory).forEach((usernameKey) => {
+    const cached = safe.uuidDirectory[usernameKey];
+    if (typeof cached === 'string') {
+      const uuid = cached.trim().toLowerCase().replace(/-/g, '');
+      safe.uuidDirectory[usernameKey] = {
+        uuid,
+        avatarUrl: uuid ? `https://mc-heads.net/avatar/${uuid}/64` : '',
+        updatedAt: 0,
+      };
+    }
+  });
+
   return safe;
+}
+
+function normalizeUuid(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) {
+    return '';
+  }
+
+  const compact = raw.replace(/-/g, '');
+  return /^[0-9a-f]{32}$/.test(compact) ? compact : '';
+}
+
+function normalizeUsernameKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function buildAvatarUrl(uuid, size = 64) {
+  const compact = normalizeUuid(uuid);
+  return compact ? `https://mc-heads.net/avatar/${compact}/${size}` : '';
+}
+
+function getCachedIdentity(state, username) {
+  const key = normalizeUsernameKey(username);
+  if (!key || !state || typeof state !== 'object') {
+    return null;
+  }
+
+  const cached = state.uuidDirectory && typeof state.uuidDirectory[key] === 'object'
+    ? state.uuidDirectory[key]
+    : null;
+
+  if (!cached) {
+    return null;
+  }
+
+  const uuid = normalizeUuid(cached.uuid);
+  const avatarUrl = typeof cached.avatarUrl === 'string' && cached.avatarUrl.trim()
+    ? cached.avatarUrl.trim()
+    : buildAvatarUrl(uuid, 64);
+
+  return {
+    uuid,
+    avatarUrl,
+    updatedAt: toFiniteNumber(cached.updatedAt, 0),
+  };
+}
+
+function setCachedIdentity(state, username, uuid, updatedAt = nowMs()) {
+  if (!state || typeof state !== 'object') {
+    return null;
+  }
+
+  const key = normalizeUsernameKey(username);
+  const compactUuid = normalizeUuid(uuid);
+
+  if (!key || !compactUuid) {
+    return null;
+  }
+
+  if (!state.uuidDirectory || typeof state.uuidDirectory !== 'object') {
+    state.uuidDirectory = {};
+  }
+
+  if (!state.avatarDirectory || typeof state.avatarDirectory !== 'object') {
+    state.avatarDirectory = {};
+  }
+
+  const avatarUrl = buildAvatarUrl(compactUuid, 64);
+  state.uuidDirectory[key] = {
+    uuid: compactUuid,
+    avatarUrl,
+    updatedAt: toFiniteNumber(updatedAt, nowMs()),
+  };
+  state.avatarDirectory[compactUuid] = avatarUrl;
+
+  return {
+    uuid: compactUuid,
+    avatarUrl,
+  };
 }
 
 async function getKvValue() {
@@ -305,5 +400,10 @@ module.exports = {
   applyActiveDelta,
   attachLiveCounters,
   normalizeLeaderboardItems,
+  normalizeUuid,
+  normalizeUsernameKey,
+  buildAvatarUrl,
+  getCachedIdentity,
+  setCachedIdentity,
 };
 

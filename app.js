@@ -1,4 +1,4 @@
-const POLL_INTERVAL_MS = 5000;
+const POLL_INTERVAL_MS = 2000;
 const LEADERBOARD_INTERVAL_MS = 10000;
 const OFFLINE_THRESHOLD_MS = 8000;
 const THEME_STORAGE_KEY = 'dxir-theme';
@@ -362,7 +362,7 @@ function normalizePlayer(raw) {
 
   return {
     key,
-    uuid: normalizeUuid(uuid),
+    uuid,
     name,
     ping: Math.max(0, normalizeNumber(raw.ping, 0)),
     status: String(raw.status || 'online').toLowerCase() === 'offline' ? 'offline' : 'online',
@@ -374,75 +374,38 @@ function normalizePlayer(raw) {
   };
 }
 
-function normalizeUuid(value) {
-  const raw = String(value || '').trim().toLowerCase();
-  if (!raw) {
-    return '';
-  }
-
-  const compact = raw.replace(/-/g, '');
-  return /^[0-9a-f]{32}$/.test(compact) ? compact : '';
-}
-
-function buildAvatarCandidates(sourceId, fallbackName, size) {
-  const uuid = normalizeUuid(sourceId);
-  const username = String(fallbackName || '').trim();
-  const candidates = [];
-
-  if (uuid) {
-    candidates.push(`https://mc-heads.net/avatar/${uuid}/${size}`);
-    candidates.push(`https://crafatar.com/avatars/${uuid}?size=${size}&overlay`);
-  }
-
-  if (username) {
-    candidates.push(`https://minotar.net/avatar/${encodeURIComponent(username)}/${size}`);
-  }
-
-  return candidates;
-}
-
 function configureAvatarImage(image, cacheMap, cacheKey, sourceId, fallbackName, size = 64) {
   if (!image || !cacheMap || !cacheKey) {
     return;
   }
 
-  const candidates = buildAvatarCandidates(sourceId, fallbackName, size);
-  const fallback = candidates[candidates.length - 1] || '';
+  const primary = sourceId
+    ? `https://mc-heads.net/avatar/${encodeURIComponent(sourceId)}/${size}`
+    : '';
+  const fallback = fallbackName
+    ? `https://minotar.net/avatar/${encodeURIComponent(fallbackName)}/${size}`
+    : '';
   const cached = cacheMap.get(cacheKey) || '';
-  const next = cached || candidates[0] || fallback;
+  const next = cached || primary || fallback;
 
   if (!next) {
     return;
   }
 
-  if (image.dataset.avatarCurrent === next && image.complete && image.naturalWidth > 0) {
-    image.classList.add('loaded');
-    return;
-  }
-
   image.classList.remove('loaded');
-  image.dataset.avatarCurrent = next;
-
   if (image.src !== next) {
     image.src = next;
   }
 
-  let index = Math.max(0, candidates.indexOf(next));
-
   image.onload = () => {
     cacheMap.set(cacheKey, image.src || next);
-    image.dataset.avatarCurrent = image.src || next;
     image.classList.add('loaded');
   };
 
   image.onerror = () => {
-    index += 1;
-    const nextCandidate = candidates[index] || '';
-
-    if (nextCandidate) {
-      cacheMap.set(cacheKey, nextCandidate);
-      image.dataset.avatarCurrent = nextCandidate;
-      image.src = nextCandidate;
+    if (fallback && image.src !== fallback) {
+      cacheMap.set(cacheKey, fallback);
+      image.src = fallback;
       return;
     }
 
@@ -645,7 +608,13 @@ function normalizeLeaderboardEntry(entry) {
     return null;
   }
 
-  return { key, uuid, username, value };
+  return {
+    key,
+    uuid,
+    username,
+    value,
+    avatarUrl: String(entry.avatarUrl || '').trim(),
+  };
 }
 
 function buildLeaderboardSignature(items) {
@@ -920,7 +889,7 @@ async function fetchStats() {
     }
 
     const payload = await response.json();
-    renderData(payload);
+    renderData(payload, 'api');
   } catch (error) {
     if (!state.hasData) {
       renderLoading();
@@ -937,15 +906,112 @@ async function fetchStats() {
   }
 }
 
-function startPolling() {
+function checkStaleConnection() {
+  if (!state.hasData) {
+    return;
+  }
+
+  if (Date.now() - state.lastFreshAt > OFFLINE_THRESHOLD_MS) {
+    markOffline();
+  }
+}
+
+function normalizeLeaderboardEventItems(items) {
+  return (Array.isArray(items) ? items : [])
+    .map(normalizeLeaderboardEntry)
+    .filter(Boolean)
+    .sort((a, b) => b.value - a.value);
+}
+
+function applyRealtimeLeaderboardUpdate(event) {
+  const categoryMap = {
+    kills: 'kills',
+    balance: 'balance',
+    bounty: 'bounty',
+    earnings: 'earnings',
+  };
+
+  const mapped = categoryMap[String(event?.category || '').toLowerCase()];
+  if (!mapped || !state.leaderboardsReady) {
+    return;
+  }
+
+  renderLeaderboardCategory(mapped, normalizeLeaderboardEventItems(event.items || []));
+}
+
+function attachRealtimeBindings(channel) {
+  channel.bind('stats_update', (event) => {
+    if (!event || !event.latest) {
+      return;
+    }
+
+    renderData({ data: { latest: event.latest, history: [] } }, 'realtime');
+  });
+
+  channel.bind('leaderboard_update', (event) => {
+    applyRealtimeLeaderboardUpdate(event || {});
+  });
+
+  channel.bind('player_join', () => {
+    if (elements.connectionStatus?.dataset.state !== 'online') {
+      setConnectionState('online', 'Online');
+    }
+  });
+}
+
+async function connectRealtime() {
+  try {
+    const response = await fetch('/api/realtime-config', {
+      method: 'GET',
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const config = await response.json();
+    if (!config?.enabled || !window.Pusher) {
+      if (elements.apiMessage) {
+        elements.apiMessage.textContent = 'Realtime is disabled. Showing latest snapshot only.';
+      }
+      return;
+    }
+
+    const pusher = new window.Pusher(config.key, {
+      cluster: config.cluster,
+      forceTLS: true,
+    });
+
+    state.pusher = pusher;
+    state.realtimeChannel = pusher.subscribe(config.channel);
+    attachRealtimeBindings(state.realtimeChannel);
+
+    pusher.connection.bind('connected', () => {
+      setConnectionState('online', 'Live');
+      fetchStats();
+    });
+
+    pusher.connection.bind('disconnected', () => {
+      setConnectionState('offline', 'Disconnected');
+    });
+
+    pusher.connection.bind('error', () => {
+      setConnectionState('error', 'Realtime error');
+    });
+  } catch (error) {
+    if (elements.apiMessage) {
+      elements.apiMessage.textContent = 'Unable to initialize realtime connection.';
+    }
+  }
+}
+
+function startRealtime() {
   fetchStats();
   setupLeaderboardLazyLoad();
-  state.pollTimer = window.setInterval(fetchStats, POLL_INTERVAL_MS);
-  state.leaderboardTimer = window.setInterval(() => {
-    if (state.leaderboardsReady) {
-      fetchLeaderboards();
-    }
-  }, LEADERBOARD_INTERVAL_MS);
+  connectRealtime();
+  state.staleTimer = window.setInterval(checkStaleConnection, 1000);
 }
 
 function bindEvents() {
@@ -996,6 +1062,6 @@ document.addEventListener('DOMContentLoaded', () => {
   bindEvents();
   initChart();
   renderLoading();
-  startPolling();
+  startRealtime();
 });
 

@@ -1,4 +1,14 @@
-const { LEADERBOARD_LIMIT, normalizeLeaderboardItems, nowMs, readState, withState } = require('./_state');
+const {
+  LEADERBOARD_LIMIT,
+  normalizeLeaderboardItems,
+  nowMs,
+  readState,
+  withState,
+  getCachedIdentity,
+  normalizeUuid,
+  buildAvatarUrl,
+} = require('./_state');
+const { publishRealtimeEvent } = require('./_realtime');
 
 const API_TO_STORE_KEY = {
   topKills: 'kills',
@@ -17,11 +27,24 @@ function setCorsHeaders(res) {
   res.setHeader('Cache-Control', 'no-store, max-age=0');
 }
 
+function hydrateRows(sourceState, rows) {
+  return rows.map((entry) => {
+    const username = String(entry?.username || '').trim();
+    const cached = getCachedIdentity(sourceState, username);
+    const uuid = normalizeUuid(entry?.uuid) || normalizeUuid(cached?.uuid);
+    return {
+      ...entry,
+      uuid,
+      avatarUrl: buildAvatarUrl(uuid, 64),
+    };
+  });
+}
+
 function cloneState(source) {
   return HISTORY_KEYS.reduce((acc, key) => {
     const storeKey = API_TO_STORE_KEY[key];
     const rows = source?.leaderboards?.[storeKey]?.items;
-    acc[key] = Array.isArray(rows) ? rows.map((entry) => ({ ...entry })) : [];
+    acc[key] = Array.isArray(rows) ? hydrateRows(source, rows) : [];
     return acc;
   }, {});
 }
@@ -110,10 +133,22 @@ module.exports = async (req, res) => {
         });
       });
 
-      return res.status(200).json({
+      const responsePayload = {
         ...cloneState(state),
         updatedAt: toTimestampMap(state),
-      });
+      };
+
+      await Promise.all(
+        HISTORY_KEYS
+          .filter((key) => Object.prototype.hasOwnProperty.call(body, key))
+          .map((key) => publishRealtimeEvent('leaderboard_update', {
+            category: API_TO_STORE_KEY[key],
+            updatedAt: Number(responsePayload.updatedAt?.[key] || timestamp),
+            items: Array.isArray(responsePayload[key]) ? responsePayload[key] : [],
+          }))
+      );
+
+      return res.status(200).json(responsePayload);
     } catch (error) {
       return res.status(400).json({
         error: 'Invalid JSON payload',

@@ -483,6 +483,85 @@ async function refreshAll() {
   updateStatusLine();
 }
 
+function applyRealtimeCategory(categoryName, items, updatedAt) {
+  const category = state.categories[categoryName];
+  if (!category) {
+    return;
+  }
+
+  const normalized = normalizeItems(items);
+  const signature = buildSignature(normalized);
+
+  category.loaded = true;
+  category.loading = false;
+  category.error = '';
+  category.updatedAt = Number(updatedAt || Date.now());
+
+  if (signature !== category.signature || !category.items.length) {
+    category.signature = signature;
+    category.items = normalized;
+    syncCategory(categoryName);
+  }
+
+  state.lastUpdatedAt = Math.max(state.lastUpdatedAt, category.updatedAt);
+  updateStatusLine();
+}
+
+function bindRealtimeEvents(channel) {
+  const categoryMap = {
+    kills: 'topKills',
+    balance: 'richest',
+    bounty: 'bounty',
+    earnings: 'earnings',
+    playtime: 'playtime',
+  };
+
+  channel.bind('leaderboard_update', (event) => {
+    const category = categoryMap[String(event?.category || '').toLowerCase()];
+    if (!category) {
+      return;
+    }
+
+    applyRealtimeCategory(category, Array.isArray(event.items) ? event.items : [], event.updatedAt);
+  });
+}
+
+async function connectRealtime() {
+  try {
+    const response = await fetch('/api/realtime-config', {
+      method: 'GET',
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const config = await response.json();
+    if (!config?.enabled || !window.Pusher) {
+      return;
+    }
+
+    state.pusher = new window.Pusher(config.key, {
+      cluster: config.cluster,
+      forceTLS: true,
+    });
+    state.channel = state.pusher.subscribe(config.channel);
+    bindRealtimeEvents(state.channel);
+
+    state.pusher.connection.bind('connected', () => {
+      setStatus('Live leaderboard stream connected', 'ready');
+    });
+
+    state.pusher.connection.bind('disconnected', () => {
+      setStatus('Realtime disconnected. Showing latest known rankings.', 'error');
+    });
+  } catch (error) {
+    setStatus('Unable to connect to realtime stream. Showing latest snapshot.', 'error');
+  }
+}
+
 function renderInitialLoading() {
   CATEGORY_ORDER.forEach((name) => {
     renderLoadingState(elements.lists[name], cards[name].title);
@@ -490,10 +569,10 @@ function renderInitialLoading() {
   setStatus('Loading leaderboard data...', 'loading');
 }
 
-function startPolling() {
+function startRealtime() {
   renderInitialLoading();
   refreshAll();
-  state.timer = window.setInterval(refreshAll, POLL_INTERVAL_MS);
+  connectRealtime();
   state.clock = window.setInterval(updateStatusLine, 1000);
 }
 
@@ -516,5 +595,5 @@ function bindEvents() {
 document.addEventListener('DOMContentLoaded', () => {
   applyTheme(getThemeFromStorage(), false);
   bindEvents();
-  startPolling();
+  startRealtime();
 });

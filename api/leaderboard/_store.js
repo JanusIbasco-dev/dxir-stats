@@ -4,7 +4,11 @@ const {
   nowMs,
   readState,
   withState,
+  getCachedIdentity,
+  normalizeUuid,
+  buildAvatarUrl,
 } = require('../_state');
+const { publishRealtimeEvent } = require('../_realtime');
 
 function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -27,8 +31,19 @@ function extractItems(input) {
 
 function createCategoryHandler(categoryKey) {
   function cloneRows(rows) {
-    return rows.map((entry) => ({ ...entry }));
+    return rows.map((entry) => {
+      const username = String(entry?.username || '').trim();
+      const cached = getCachedIdentity(memoryState, username);
+      const uuid = normalizeUuid(entry?.uuid) || normalizeUuid(cached?.uuid);
+      return {
+        ...entry,
+        uuid,
+        avatarUrl: buildAvatarUrl(uuid, 64),
+      };
+    });
   }
+
+  let memoryState = null;
 
   return async (req, res) => {
     setCorsHeaders(res);
@@ -39,6 +54,7 @@ function createCategoryHandler(categoryKey) {
 
     if (req.method === 'GET') {
       const state = await readState();
+      memoryState = state;
       const category = state.leaderboards?.[categoryKey] || { items: [], updatedAt: 0 };
       res.setHeader('X-Updated-At', String(Number(category.updatedAt || 0)));
       return res.status(200).json(cloneRows(Array.isArray(category.items) ? category.items : []));
@@ -61,7 +77,14 @@ function createCategoryHandler(categoryKey) {
           };
         });
 
+        memoryState = state;
         const category = state.leaderboards?.[categoryKey] || { items: [], updatedAt: timestamp };
+        await publishRealtimeEvent('leaderboard_update', {
+          category: categoryKey,
+          updatedAt: Number(category.updatedAt || timestamp),
+          items: cloneRows(Array.isArray(category.items) ? category.items : []),
+        });
+
         res.setHeader('X-Updated-At', String(Number(category.updatedAt || timestamp)));
         return res.status(200).json(cloneRows(Array.isArray(category.items) ? category.items : []));
       } catch (error) {
