@@ -6,7 +6,8 @@ const { status: minecraftStatus } = require('minecraft-server-util');
 const DEFAULT_IP = 'dxir.live';
 const startedAt = Date.now();
 const rawBaseUrl = process.env.DXIR_STATS_URL || process.env.DXIR_STATS_ENDPOINT || process.env.VERCEL_URL || process.argv[2] || 'https://stats.dxir.live';
-const endpoint = normalizeEndpoint(rawBaseUrl);
+const PORT = process.env.PORT || 3000;
+const endpoint = normalizeEndpoint(rawBaseUrl, PORT);
 
 const GIGABYTE = 1024 * 1024 * 1024;
 const MEGABYTE = 1024 * 1024;

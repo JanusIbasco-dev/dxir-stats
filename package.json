@@ -5,7 +5,7 @@
   "description": "DXIR STATS — a Vercel-ready live server dashboard and sender script.",
   "main": "api/data.js",
   "scripts": {
-    "send": "node sender/send.js"
+    "start": "node sender/send.js"
   },
   "engines": {
     "node": ">=18"
