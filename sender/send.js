@@ -232,7 +232,7 @@ async function sendOnce() {
 async function main() {
   console.log(`[DXIR STATS] Sending to ${endpoint}`);
   await sendOnce();
-  setInterval(sendOnce, 2000);
+  setInterval(sendOnce, 100);
 }
 
 main().catch((error) => {
